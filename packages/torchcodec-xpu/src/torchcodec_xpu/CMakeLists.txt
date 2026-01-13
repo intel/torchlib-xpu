@@ -10,7 +10,7 @@ set(PYBIND11_FINDPYTHON ON)
 find_package(pybind11 REQUIRED)
 find_package(Torch REQUIRED)
 find_package(TorchCodec REQUIRED)
-find_package(Python3 EXACT COMPONENTS Development)
+find_package(Python3 COMPONENTS Development)
 
 if(DEFINED TORCHCODEC_XPU_DISABLE_COMPILE_WARNING_AS_ERROR AND TORCHCODEC_XPU_DISABLE_COMPILE_WARNING_AS_ERROR)
     set(TORCHCODEC_XPU_WERROR_OPTION "")
@@ -36,7 +36,16 @@ pkg_check_modules(LIBVA REQUIRED IMPORTED_TARGET libva)
 function(make_torchcodec_xpu_libraries torchcodec_variant)
     set(libname "xpu_ops${torchcodec_variant}")
     set(sources
+        ColorConversionKernel.cpp
         XpuDeviceInterface.cpp)
+
+    if($ENV{CXX} MATCHES "icpx")
+        set (WITH_SYCL_KERNELS ON)
+        message(STATUS "Intel compiler in use, Sycl support enabled")
+    else()
+        set (WITH_SYCL_KERNELS OFF)
+        message(STATUS "Non-Intel compiler in use, Sycl support disabled")
+    endif()
 
     python_add_library(${libname} MODULE WITH_SOABI ${sources})
     # Avoid adding the "lib" prefix which we already add explicitly.
@@ -52,6 +61,13 @@ function(make_torchcodec_xpu_libraries torchcodec_variant)
       torchcodec::ffmpeg${torchcodec_variant}
       PkgConfig::L0
     )
+
+    if(WITH_SYCL_KERNELS)
+        target_compile_definitions(${libname} PRIVATE WITH_SYCL_KERNELS=1)
+        target_compile_options(${libname} PRIVATE -fsycl)
+        target_link_options(${libname} PRIVATE -fsycl)
+    endif()
+
 
     install(
         TARGETS ${libname}

@@ -2,6 +2,9 @@
 // Copyright (c) 2026 Intel Corporation. All Rights Reserved.
 
 #include <unistd.h>
+#include <stdlib.h>
+#include <string>
+#include <unordered_map>
 
 #include <level_zero/ze_api.h>
 #include <va/va_drmcommon.h>
@@ -9,6 +12,7 @@
 #include <ATen/DLConvertor.h>
 #include <c10/xpu/XPUStream.h>
 
+#include "ColorConversionKernel.h"
 #include "Cache.h"
 #include "FFMPEGCommon.h"
 #include "XpuDeviceInterface.h"
@@ -21,7 +25,10 @@ extern "C" {
 }
 
 namespace facebook::torchcodec {
+
 namespace {
+
+const char* USE_SYCL_KERNELS = std::getenv("USE_SYCL_KERNELS");
 
 static bool g_xpu = registerDeviceInterface(
     DeviceInterfaceKey(torch::kXPU),
@@ -33,6 +40,32 @@ const int MAX_XPU_GPUS = 128;
 const int MAX_CONTEXTS_PER_GPU_IN_CACHE = -1;
 PerGpuCache<AVBufferRef, Deleterp<AVBufferRef, void, av_buffer_unref>>
     g_cached_hw_device_ctxs(MAX_XPU_GPUS, MAX_CONTEXTS_PER_GPU_IN_CACHE);
+
+inline bool to_bool(std::string str) {
+    static const std::unordered_map<std::string, bool> bool_map = {
+        {"1", true},  {"0", false},
+        {"on", true}, {"off", false},
+        {"true", true}, {"false", false}
+    };
+
+    auto it = bool_map.find(str);
+    if (it != bool_map.end()) {
+        return it->second;
+    }
+    return false;
+}
+
+inline bool use_sycl_color_conversion_kernel() {
+#ifndef WITH_SYCL_KERNELS
+  return false;
+#else
+  if (!USE_SYCL_KERNELS) {
+    // By default attempt to convert with sycl (optimized path).
+    return true;
+  }
+  return to_bool(USE_SYCL_KERNELS);
+#endif
+}
 
 UniqueAVBufferRef getVaapiContext(const torch::Device& device) {
   enum AVHWDeviceType type = av_hwdevice_find_type_by_name("vaapi");
@@ -90,6 +123,14 @@ XpuDeviceInterface::XpuDeviceInterface(const torch::Device& device)
   torch::Tensor dummyTensorForXpuInitialization = torch::empty(
       {1}, torch::TensorOptions().dtype(torch::kUInt8).device(device_));
   ctx_ = getVaapiContext(device_);
+
+  if (use_sycl_color_conversion_kernel()) {
+    VLOG(1) << "XpuDeviceInterface initialized with SYCL kernel backend";
+    VLOG(1) << "Backend: SYCL_KERNEL (Direct NV12→RGB)";
+  } else {
+    VLOG(1) << "XpuDeviceInterface initialized with VAAPI filter graph backend";
+    VLOG(1) << "Backend: VAAPI_FILTER (Flexible, with scaling)";
+  }
 }
 
 XpuDeviceInterface::~XpuDeviceInterface() {
@@ -137,6 +178,8 @@ void deleter(DLManagedTensor* self) {
   std::unique_ptr<DLManagedTensor> tensor(self);
   std::unique_ptr<xpuManagerCtx> context((xpuManagerCtx*)self->manager_ctx);
   zeMemFree(context->zeCtx, self->dl_tensor.data);
+  free(self->dl_tensor.shape);
+  free(self->dl_tensor.strides);
 }
 
 torch::Tensor AVFrameToTensor(
@@ -162,7 +205,7 @@ torch::Tensor AVFrameToTensor(
   TORCH_CHECK(
       desc.layers[0].num_planes == 1,
       "Expected 1 plane, got ",
-      desc.num_layers);
+      desc.layers[0].num_planes);
 
   std::unique_ptr<xpuManagerCtx> context = std::make_unique<xpuManagerCtx>();
   ze_device_handle_t ze_device{};
@@ -201,7 +244,11 @@ torch::Tensor AVFrameToTensor(
   close(desc.objects[0].fd);
 
   std::unique_ptr<DLManagedTensor> dl_dst = std::make_unique<DLManagedTensor>();
-  int64_t shape[3] = {desc.height, desc.width, 4};
+  int64_t* shape = (int64_t*)malloc(3*sizeof(int64_t));
+
+  shape[0] = frame->height;
+  shape[1] = frame->width;
+  shape[2] = 4;
 
   context->avFrame.reset(av_frame_alloc());
   TORCH_CHECK(context->avFrame.get(), "Failed to allocate AVFrame");
@@ -266,6 +313,23 @@ void XpuDeviceInterface::convertAVFrameToFrameOutput(
   }
 
   auto start = std::chrono::high_resolution_clock::now();
+  if (!convertAVFrameToFrameOutput_SYCL(avFrame, dst)) {
+    convertAVFrameToFrameOutput_FilterGraph(avFrame, dst);
+  }
+
+  auto end = std::chrono::high_resolution_clock::now();
+
+  std::chrono::duration<double, std::micro> duration = end - start;
+  VLOG(9) << "Conversion of frame height=" << frameDims.height << " width=" << frameDims.width
+          << " took: " << duration.count() << "us" << std::endl;
+}
+
+void XpuDeviceInterface::convertAVFrameToFrameOutput_FilterGraph(
+    UniqueAVFrame& avFrame,
+    torch::Tensor& dst) {
+  VLOG(1) << "Using VAAPI filter graph backend for conversion";
+  auto frameDims = FrameDims(avFrame->height, avFrame->width);
+
   // We need to compare the current frame context with our previous frame
   // context. If they are different, then we need to re-create our colorspace
   // conversion objects. We create our colorspace conversion objects late so
@@ -308,12 +372,81 @@ void XpuDeviceInterface::convertAVFrameToFrameOutput(
 
   torch::Tensor dst_rgb4 = AVFrameToTensor(device_, filteredAVFrame);
   dst.copy_(dst_rgb4.narrow(2, 0, 3));
+}
 
-  auto end = std::chrono::high_resolution_clock::now();
+bool XpuDeviceInterface::convertAVFrameToFrameOutput_SYCL(
+    [[maybe_unused]] UniqueAVFrame& frame,
+    [[maybe_unused]] torch::Tensor& dst) {
+  bool converted = false;
+  if (!use_sycl_color_conversion_kernel()) {
+    return converted;
+  }
 
-  std::chrono::duration<double, std::micro> duration = end - start;
-  VLOG(9) << "Conversion of frame height=" << frameDims.height << " width=" << frameDims.width
-          << " took: " << duration.count() << "us" << std::endl;
+#ifdef WITH_SYCL_KERNELS
+  VLOG(1) << "Using SYCL kernel backend for conversion";
+  TORCH_CHECK_EQ(frame->format, AV_PIX_FMT_VAAPI);
+  VADRMPRIMESurfaceDescriptor desc{};
+  VAStatus sts = vaExportSurfaceHandle(
+      getVaDisplayFromAV(frame.get()),
+      (VASurfaceID)(uintptr_t)frame->data[3],
+      VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
+      VA_EXPORT_SURFACE_READ_ONLY,
+      &desc);
+  TORCH_CHECK(
+      sts == VA_STATUS_SUCCESS,
+      "vaExportSurfaceHandle failed: ",
+      vaErrorStr(sts));
+
+  TORCH_CHECK(desc.num_objects == 1, "Expected 1 fd, got ", desc.num_objects);
+  std::unique_ptr<xpuManagerCtx> context = std::make_unique<xpuManagerCtx>();
+  ze_device_handle_t ze_device{};
+  sycl::queue queue = c10::xpu::getCurrentXPUStream(device_.index());
+  queue
+      .submit([&](sycl::handler& cgh) {
+        cgh.host_task([&](const sycl::interop_handle& ih) {
+          context->zeCtx =
+              ih.get_native_context<sycl::backend::ext_oneapi_level_zero>();
+          ze_device =
+              ih.get_native_device<sycl::backend::ext_oneapi_level_zero>();
+        });
+      })
+      .wait();
+
+  ze_external_memory_import_fd_t import_fd_desc{};
+  import_fd_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
+  import_fd_desc.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
+  import_fd_desc.fd = desc.objects[0].fd;
+
+  ze_device_mem_alloc_desc_t alloc_desc{};
+  alloc_desc.pNext = &import_fd_desc;
+  void* usm_ptr = nullptr;
+
+  ze_result_t res = zeMemAllocDevice(
+      context->zeCtx,
+      &alloc_desc,
+      desc.objects[0].size,
+      0,
+      ze_device,
+      &usm_ptr);
+  TORCH_CHECK(
+      res == ZE_RESULT_SUCCESS, "Failed to import fd=", desc.objects[0].fd);
+
+  close(desc.objects[0].fd);
+
+  convertNV12ToRGB(
+      queue,
+      (uint8_t*)usm_ptr + desc.layers[0].offset[0],
+      (uint8_t*)usm_ptr + desc.layers[1].offset[0],
+      (uint8_t*)dst.data_ptr(),
+      frame->width,
+      frame->height,
+      desc.layers[0].pitch[0],
+      false);
+
+  zeMemFree(context->zeCtx, usm_ptr);
+  converted = true;
+#endif
+  return converted;
 }
 
 // inspired by https://github.com/FFmpeg/FFmpeg/commit/ad67ea9

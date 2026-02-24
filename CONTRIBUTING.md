@@ -1,57 +1,111 @@
 # Contributing
 
-### License
+## License
 
-<PROJECT NAME> is licensed under the terms in [LICENSE]<link to license file in repo>. By contributing to the project, you agree to the license and copyright terms therein and release your contribution under these terms.
+The project is licensed under the terms in [LICENSE](./LICENCE). By contributing to the project, you agree to the license and copyright terms therein and release your contribution under these terms.
 
-### Sign your work
-
-Please use the sign-off line at the end of the patch. Your signature certifies that you wrote the patch or otherwise have the right to pass it on as an open-source patch. The rules are pretty simple: if you can certify
-the below (from [developercertificate.org](http://developercertificate.org/)):
+Please use the sign-off line at the end of the patch. Your signature certifies that you wrote the patch or otherwise have the right to pass it on as an open-source patch following http://developercertificate.org/ certification. The sign-off line must look like the following:
 
 ```
-Developer Certificate of Origin
-Version 1.1
-
-Copyright (C) 2004, 2006 The Linux Foundation and its contributors.
-660 York Street, Suite 102,
-San Francisco, CA 94110 USA
-
-Everyone is permitted to copy and distribute verbatim copies of this
-license document, but changing it is not allowed.
-
-Developer's Certificate of Origin 1.1
-
-By making a contribution to this project, I certify that:
-
-(a) The contribution was created in whole or in part by me and I
-    have the right to submit it under the open source license
-    indicated in the file; or
-
-(b) The contribution is based upon previous work that, to the best
-    of my knowledge, is covered under an appropriate open source
-    license and I have the right under that license to submit that
-    work with modifications, whether created in whole or in part
-    by me, under the same open source license (unless I am
-    permitted to submit under a different license), as indicated
-    in the file; or
-
-(c) The contribution was provided directly to me by some other
-    person who certified (a), (b) or (c) and I have not modified
-    it.
-
-(d) I understand and agree that this project and the contribution
-    are public and that a record of the contribution (including all
-    personal information I submit with it, including my sign-off) is
-    maintained indefinitely and may be redistributed consistent with
-    this project or the open source license(s) involved.
+Signed-off-by: Joe Smith <joe.smith@email.com>
 ```
 
-Then you just add a line to every git commit message:
+Use your real name (sorry, no pseudonyms or anonymous contributions). If you set your `user.name` and `user.email` git configs, you can sign your commit automatically with `git commit -s`.
 
-    Signed-off-by: Joe Smith <joe.smith@email.com>
+## How to contribute
 
-Use your real name (sorry, no pseudonyms or anonymous contributions.)
+Open an issue on Github if you've found a problem with the project or have a question.
 
-If you set your `user.name` and `user.email` git configs, you can sign your
-commit automatically with `git commit -s`.
+Submit a PR on Github to propose changes. Before doing so make sure that linter results are clean and tests are passing.
+
+Before running any checks, make sure to install the project with the test dependencies:
+
+```
+uv venv && uv pip install torch~=2.10.0 -e ".[test]" \
+  --index https://download.pytorch.org/whl/xpu -vv
+```
+
+## How to run linter
+
+```
+ruff check
+```
+
+## How to test Intel® plugin for TorchCodec
+
+At the moment Intel® Plugin for [TorchCodec] uses patched TorchCodec tests. To setup the testing environment, run:
+
+```
+export TORCHCODEC_XPU_PATH=$TORCHLIB_XPU_PATH/packages/torchcodec-xpu/
+git clone https://github.com/dvrogozh/torchcodec.git && cd torchcodec
+git am $TORCHCODEC_XPU_PATH/patches/0001-Add-XPU-support-to-tests.patch
+```
+
+The patch file can be reviewed [here](packages/torchcodec-xpu/0001-Add-XPU-support-to-tests.patch). The patch is known to apply clean on the following TorchCodec versions: `v0.10.0`.
+
+TorchCodec tests require some additional packages. Install them as follows:
+
+```
+uv pip install torchvision \
+  --index https://download.pytorch.org/whl/xpu
+```
+
+Execute the tests with:
+
+```
+cd torchcodec && pytest test/
+```
+
+If tests are flooding the tmpfs, consider to prune pytest directory or use other location:
+
+```
+sudo rm -rf /tmp/pytest-of-$(whoami)
+# or run as
+pytest --basetemp=$HOME/tmp test/
+```
+
+Some of the TorchCodec tests require FFmpeg with enabled CPU audio and video decoders and encoders. New versions of TorchCodec might require more FFmpeg codecs to be enabled. If you self-build FFmpeg, consider to configure all codecs required by TorchCodec to reduce number of reported errors on a test run. Note that some of the codecs are GPL licensed. At the moment the following FFmpeg configuration is known to be required to pass TorchCodec tests:
+
+```
+# Install prerequisites (Ubuntu)
+apt-get install \
+    libaom-dev \
+    libmp3lame-dev \
+    libx264-dev \
+    libx265-dev \
+    libva-dev \
+    libvpx-dev
+
+./configure \
+    --prefix=$HOME/_install \
+    --libdir=$HOME/_install/lib \
+    --disable-static \
+    --disable-stripping \
+    --disable-doc \
+    --enable-shared \
+    --enable-vaapi \
+    --enable-libmp3lame \
+    --enable-gpl \
+    --enable-libaom \
+    --enable-libx264 \
+    --enable-libx265 \
+    --enable-libvpx
+```
+
+## Tips
+
+### oneAPI compatibility
+
+Use the following compatibility table when self-building the project and its dependencies:
+
+| PyTorch | Torchvision | oneAPI   |
+| ------- | ----------- | -------- |
+| 2.10    | 0.25        | [2025.3] |
+| 2.9     | 0.24        | [2025.2] |
+| 2.8     | 0.23        | [2025.1] |
+
+[TorchCodec]: https://github.com/meta-pytorch/torchcodec
+
+[2025.3]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-10.html
+[2025.2]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-9.html
+[2025.1]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-8.html

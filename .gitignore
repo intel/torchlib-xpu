@@ -2,4 +2,4 @@
 **/__pycache__
 
 dist/
-src/torchcodec_xpu/version.py
+packages/torchcodec-xpu/src/torchcodec_xpu/version.py

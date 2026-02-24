@@ -10,7 +10,7 @@ build-backend = "scikit_build_core.build"
 name = "torchcodec-xpu"
 description = "Intel extension for torchcodec"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [
     { name = "Dmitry Rogozhkin", email = "dmitry.v.rogozhkin@intel.com" },
@@ -21,13 +21,12 @@ dependencies = [
 ]
 
 [project.urls]
-GitHub = "https://github.com/dvrogozh/torchcodec-xpu"
+GitHub = "https://github.com/intel/torchlib-xpu"
 
 [project.optional-dependencies]
 test = [
     "numpy",
     "pytest",
-    "ruff",
     "torcheval",
 ]
 
@@ -38,7 +37,3 @@ cmake.minimum-version = "3.18"
 provider = "scikit_build_core.metadata.regex"
 input = "version.txt"
 regex = "^v?(?P<value>[0-9a-zA-Z.+-_]+)"
-
-[tool.ruff.lint]
-    select = ["E", "F", "I"]
-    ignore = ["E501", "F403", "F405"]

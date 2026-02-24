@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # Copyright (c) 2025 Dmitry Rogozhkin.
+# Copyright (c) 2026 Intel Corporation. All Rights Reserved.
 
 import ctypes
 import importlib

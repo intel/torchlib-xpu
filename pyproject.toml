@@ -1,0 +1,32 @@
+[project]
+name = "torchlib-xpu"
+version = "0.0.1"
+description = "Intel® XPU Library for PyTorch* Ecosystem Projects"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Dmitry Rogozhkin", email = "dmitry.v.rogozhkin@intel.com" },
+]
+dependencies = [ "torchcodec-xpu" ]
+
+[project.optional-dependencies]
+test = [
+    "ruff",
+    "torchcodec-xpu[test]"
+]
+
+[project.urls]
+GitHub = "https://github.com/intel/torchlib-xpu"
+
+[tool.uv.sources]
+# 'workspace = true' indicates that project will be provided by the workspace
+# rather than fetched from PyPI
+torchcodec-xpu = { workspace = true }
+
+[tool.uv.workspace]
+members = [ "packages/*" ]
+
+[tool.ruff.lint]
+    select = ["E", "F", "I"]
+    ignore = ["E501", "F403", "F405"]

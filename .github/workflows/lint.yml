@@ -22,4 +22,4 @@ jobs:
         python3 -m pip install ruff
     - name: 'Test with ruff'
       run: |
-        ruff check
+        ruff check -v

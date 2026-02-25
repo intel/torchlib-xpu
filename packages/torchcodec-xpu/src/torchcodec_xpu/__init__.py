@@ -3,43 +3,22 @@
 
 import ctypes
 import importlib
-import sys
 import traceback
-from pathlib import Path
 
 import torch
 import torchcodec
 
 
 def _get_extension_path(lib_name: str) -> str:
-    extension_suffixes = []
-    if sys.platform == "linux":
-        extension_suffixes = importlib.machinery.EXTENSION_SUFFIXES
-    #elif sys.platform in ("win32", "cygwin"):
-    #    extension_suffixes = importlib.machinery.EXTENSION_SUFFIXES + [".dll", ".pyd"]
-    else:
-        raise NotImplementedError(f"{sys.platform = } is not not supported")
-    loader_details = (
-        importlib.machinery.ExtensionFileLoader,
-        extension_suffixes,
-    )
-
-    extfinder = importlib.machinery.FileFinder(
-        str(Path(__file__).parent), loader_details
-    )
-    ext_specs = extfinder.find_spec(lib_name)
-    if ext_specs is None:
+    spec = importlib.util.find_spec(lib_name)
+    if spec is None or spec.origin is None:
         raise ImportError(f"No spec found for {lib_name}")
-
-    if ext_specs.origin is None:
-        raise ImportError(f"Existing spec found for {lib_name} does not have an origin")
-
-    return ext_specs.origin
+    return spec.origin
 
 def load_torchcodec_xpu_shared_library():
     exceptions = []
     ffmpeg_major_version = torchcodec.ffmpeg_major_version
-    xpu_library_name = f"libtorchcodec_xpu{ffmpeg_major_version}"
+    xpu_library_name = f"torchcodec_xpu.xpu_ops{ffmpeg_major_version}"
     try:
         ctypes.CDLL(torchcodec.core_library_path)
         torch.ops.load_library(_get_extension_path(xpu_library_name))

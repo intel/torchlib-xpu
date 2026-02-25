@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Dmitry Rogozhkin.
 
 cmake_minimum_required(VERSION 3.18)
-project(TorchCodec)
+project(${SKBUILD_PROJECT_NAME})
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -9,7 +9,7 @@ set(PYBIND11_FINDPYTHON ON)
 find_package(pybind11 REQUIRED)
 find_package(Torch REQUIRED)
 find_package(TorchCodec REQUIRED)
-find_package(Python3 ${PYTHON_VERSION} EXACT COMPONENTS Development)
+find_package(Python3 EXACT COMPONENTS Development)
 
 if(DEFINED TORCHCODEC_XPU_DISABLE_COMPILE_WARNING_AS_ERROR AND TORCHCODEC_XPU_DISABLE_COMPILE_WARNING_AS_ERROR)
     set(TORCHCODEC_XPU_WERROR_OPTION "")
@@ -33,11 +33,11 @@ pkg_check_modules(L0 REQUIRED IMPORTED_TARGET level-zero)
 pkg_check_modules(LIBVA REQUIRED IMPORTED_TARGET libva)
 
 function(make_torchcodec_xpu_libraries torchcodec_variant)
-    set(libname "libtorchcodec_xpu${torchcodec_variant}")
+    set(libname "xpu_ops${torchcodec_variant}")
     set(sources
         XpuDeviceInterface.cpp)
 
-    add_library(${libname} SHARED ${sources})
+    python_add_library(${libname} MODULE WITH_SOABI ${sources})
     # Avoid adding the "lib" prefix which we already add explicitly.
     set_target_properties(${libname} PROPERTIES PREFIX "")
     set_target_properties(${libname} PROPERTIES CXX_STANDARD 17)
@@ -45,36 +45,16 @@ function(make_torchcodec_xpu_libraries torchcodec_variant)
         PRIVATE
         "${Python3_INCLUDE_DIRS}"
     )
-    target_link_libraries(${libname}
+    target_link_libraries(${libname} PRIVATE
       ${TORCH_LIBRARIES}
       torchcodec::core${torchcodec_variant}
       torchcodec::ffmpeg${torchcodec_variant}
       PkgConfig::L0
     )
 
-    if(WIN32)
-        # On Windows, the built artifacts are put in Release/Debug
-        # subdirectories by default. We want to avoid that, otherwise our
-        # install() step would not know where to find those.
-        set_target_properties(${libname} PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_CURRENT_BINARY_DIR}
-            RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_CURRENT_BINARY_DIR}
-            LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_CURRENT_BINARY_DIR}
-            LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_CURRENT_BINARY_DIR}
-            ARCHIVE_OUTPUT_DIRECTORY_DEBUG ${CMAKE_CURRENT_BINARY_DIR}
-            ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${CMAKE_CURRENT_BINARY_DIR}
-        )
-    endif()
-
-    # The install step is invoked within CMakeBuild.build_library() in
-    # setup.py and just copies the built files from the temp
-    # cmake/setuptools build folder into the CMAKE_INSTALL_PREFIX folder. We
-    # still need to manually pass "DESTINATION ..." for cmake to copy those
-    # files in CMAKE_INSTALL_PREFIX instead of CMAKE_INSTALL_PREFIX/lib.
     install(
         TARGETS ${libname}
-        LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}  # For Windows DLLs
+	DESTINATION ${SKBUILD_PROJECT_NAME}
     )
 endfunction()
 

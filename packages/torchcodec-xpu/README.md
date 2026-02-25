@@ -1,6 +1,6 @@
 # Intel Plugin for TorchCodec
 
-This repos contains a prototype of the Intel Plugin for [TorchCodec].
+This repo contains a prototype of the Intel Plugin for [TorchCodec].
 
 # Prerequisites
 
@@ -19,19 +19,7 @@ Additionally, to build:
 
 # How to build
 
-* Install PyTorch v2.10.x with enabled XPU backend. For details refer to [Getting Started on Intel GPU].
-
-```
-pip3 install torch~=2.10.0 --index-url https://download.pytorch.org/whl/xpu
-```
-
-* Install TorchCodec version of v0.10.x series:
-
-```
-pip3 install torchcodec~=0.10.0
-```
-
-* Install matching version of oneAPI [2025.3]
+* Install oneAPI [2025.3]
 
 * Install FFmpeg with enabled VAAPI hardware acceleration. For example:
 
@@ -58,7 +46,8 @@ cd torchcodec-xpu
 export PKG_CONFIG_PATH=$HOME/_install/lib/pkgconfig
 export LD_LIBRARY_PATH=$HOME/_install/lib:$LD_LIBRARY_PATH
 
-python3 -m pip install --no-build-isolation -vv -e .
+uv venv && uv pip install torch~=2.10.0 -e . \
+  --index https://download.pytorch.org/whl/xpu -vv
 ```
 
 # How to use

@@ -1,6 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+requires = [
+    "scikit-build-core>=0.10",
+    "torch",
+    "torchcodec~=0.10.0"
+]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "torchcodec-xpu"
@@ -12,12 +16,12 @@ authors = [
     { name = "Dmitry Rogozhkin", email = "dmitry.v.rogozhkin@intel.com" },
 ]
 dynamic = ["version"]
+dependencies = [
+    "torchcodec~=0.10.0"
+]
 
 [project.urls]
 GitHub = "https://github.com/dvrogozh/torchcodec-xpu"
-
-[tool.setuptools.dynamic]
-version = {file = "version.txt"}
 
 [project.optional-dependencies]
 test = [
@@ -26,6 +30,11 @@ test = [
     "ruff",
     "torcheval",
 ]
+
+[tool.scikit-build.metadata.version]
+provider = "scikit_build_core.metadata.regex"
+input = "version.txt"
+regex = "^v?(?P<value>[0-9a-zA-Z.+-_]+)"
 
 [tool.ruff.lint]
     select = ["E", "F", "I"]

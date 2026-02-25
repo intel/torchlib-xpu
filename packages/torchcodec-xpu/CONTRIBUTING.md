@@ -8,7 +8,8 @@ results are clean and tests are passing.
 Before running any checks, make sure to install the project with the test dependencies:
 
 ```
-python3 -m pip install --no-build-isolation -vv -e ".[test]"
+uv venv && uv pip install torch~=2.10.0 -e ".[test]" \
+  --index https://download.pytorch.org/whl/xpu -vv
 ```
 
 ## How to run linter
@@ -59,14 +60,14 @@ apt-get install \
 TorchCodec tests require some additional packages. Install them as follows:
 
 ```
-python3 -m pip install torchvision
+uv pip install torchvision \
+  --index https://download.pytorch.org/whl/xpu
 ```
 
 Finally, execute the tests with:
 
 ```
-cd torchcodec
-python3 -m pytest test/
+cd torchcodec && pytest test/
 ```
 
 If tests are flooding the tmpfs, consider to prune pytest directory or use other location:
@@ -74,7 +75,7 @@ If tests are flooding the tmpfs, consider to prune pytest directory or use other
 ```
 sudo rm -rf /tmp/pytest-of-$(whoami)
 # or run as
-python3 -m pytest --basetemp=$HOME/tmp test/
+pytest --basetemp=$HOME/tmp test/
 ```
 
 # Build and tips

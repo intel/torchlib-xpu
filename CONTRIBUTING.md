@@ -2,7 +2,7 @@
 
 ## License
 
-The project is licensed under the terms in [LICENSE](./LICENCE). By contributing to the project, you agree to the license and copyright terms therein and release your contribution under these terms.
+The project is licensed under the terms in [LICENSE](./LICENSE). By contributing to the project, you agree to the license and copyright terms therein and release your contribution under these terms.
 
 Please use the sign-off line at the end of the patch. Your signature certifies that you wrote the patch or otherwise have the right to pass it on as an open-source patch following http://developercertificate.org/ certification. The sign-off line must look like the following:
 
@@ -41,7 +41,7 @@ git clone https://github.com/dvrogozh/torchcodec.git && cd torchcodec
 git am $TORCHCODEC_XPU_PATH/patches/0001-Add-XPU-support-to-tests.patch
 ```
 
-The patch file can be reviewed [here](packages/torchcodec-xpu/0001-Add-XPU-support-to-tests.patch). The patch is known to apply clean on the following TorchCodec versions: `v0.10.0`.
+The patch file can be reviewed [here](packages/torchcodec-xpu/patches/0001-Add-XPU-support-to-tests.patch). The patch is known to apply clean on the following TorchCodec versions: `v0.10.0`.
 
 TorchCodec tests require some additional packages. Install them as follows:
 

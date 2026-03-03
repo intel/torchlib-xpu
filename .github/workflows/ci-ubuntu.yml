@@ -1,0 +1,71 @@
+name: ci-ubuntu
+
+# Here we verify if torchlib-xpu would be buildable on Ubuntu 24.04 by
+# developers. We don't use this workflow to generate wheels for PyPI
+# upload as such generation requires special setup for the manylinux
+# with the oldest possible glibc as well as some special setup for the
+# project to handle support for multiple FFmpeg versions.
+
+on: [push, pull_request]
+
+permissions: read-all
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+    - name: 'Checkout'
+      uses: actions/checkout@v6
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        python-version: 3.14
+    - name: 'Install Intel drivers'
+      run: |
+        # Using datacenter LTS setup for the maximum CI stability. Alternatively
+        # we could use kobuk PPA, but it does not give us LTS.
+        wget -qO - https://repositories.intel.com/gpu/intel-graphics.key |
+          sudo gpg --yes --dearmor --output /usr/share/keyrings/intel-graphics.gpg
+        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu noble/lts/2523 unified" | \
+          sudo tee /etc/apt/sources.list.d/intel-gpu-noble.list
+        sudo apt-get update
+        sudo apt-get install -y \
+          level-zero-dev \
+          libva-dev \
+          intel-ocloc
+    - name: 'Install oneAPI 2025.3'
+      run: |
+        wget -qO- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | \
+          sudo gpg --dearmor -o /usr/share/keyrings/oneapi-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | \
+          sudo tee /etc/apt/sources.list.d/oneAPI.list
+        sudo apt-get update
+        sudo apt-get install -y intel-deep-learning-essentials-2025.3
+    - name: 'Install FFmpeg'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libavcodec-dev \
+          libavdevice-dev \
+          libavfilter-dev \
+          libavformat-dev \
+          libavutil-dev \
+          libswresample-dev \
+          libswscale-dev
+    - name: 'Build the project'
+      run: |
+        uv build --all --index https://download.pytorch.org/whl/xpu -vv
+    - name: 'Repair wheels with auditwheel'
+      run: |
+        uvx auditwheel repair dist/*.whl --wheel-dir wheelhouse/ --exclude "*" \
+          --allow-pure-python-wheel
+    - name: 'Create test environment'
+      run: |
+        uv venv
+    - name: 'Test installing wheels'
+      run: |
+        uv pip install wheelhouse/*.whl -vv
+        uv pip install torch --index https://download.pytorch.org/whl/xpu -vv
+    - name: 'Test importing torchcodec-xpu'
+      run: |
+        uv run --no-project python -c "import torchcodec_xpu"

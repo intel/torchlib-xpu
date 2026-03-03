@@ -1,7 +1,8 @@
 [build-system]
 requires = [
+    "pybind11",
     "scikit-build-core>=0.10",
-    "torch",
+    "torch~=2.10.0",  # WA: must be specified in root project with build-constraint-dependencies
     "torchcodec~=0.10.0"
 ]
 build-backend = "scikit_build_core.build"

@@ -19,6 +19,12 @@ test = [
 [project.urls]
 GitHub = "https://github.com/intel/torchlib-xpu"
 
+[tool.uv]
+package = true  # set root project as a buildable package
+# See: https://github.com/astral-sh/uv/issues/18283
+# As a workaround versions are specified inside each subproject
+# build-constraint-dependencies = ["torch~=2.10.0"]
+
 [tool.uv.sources]
 # 'workspace = true' indicates that project will be provided by the workspace
 # rather than fetched from PyPI

@@ -32,7 +32,7 @@ test = [
 ]
 
 [tool.scikit-build]
-cmake.minimum-version = "3.18"
+cmake.version = ">=3.18"
 
 [tool.scikit-build.metadata.version]
 provider = "scikit_build_core.metadata.regex"

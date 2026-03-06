@@ -59,6 +59,7 @@ function(make_torchcodec_xpu_libraries torchcodec_variant)
       ${TORCH_LIBRARIES}
       torchcodec::core${torchcodec_variant}
       torchcodec::ffmpeg${torchcodec_variant}
+      PkgConfig::LIBVA
       PkgConfig::L0
     )
 

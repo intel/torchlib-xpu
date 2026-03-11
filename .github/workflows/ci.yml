@@ -15,6 +15,10 @@ on: [push, pull_request]
 
 permissions: read-all
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   PR_OR_SHA: ${{ github.event.pull_request.number || github.sha }}
   UNIQUE_ID: ${{ github.run_id }}-${{ github.run_attempt }}

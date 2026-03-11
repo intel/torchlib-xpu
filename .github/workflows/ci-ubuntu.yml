@@ -68,4 +68,4 @@ jobs:
         uv pip install torch --index https://download.pytorch.org/whl/xpu -vv
     - name: 'Test importing torchcodec-xpu'
       run: |
-        uv run --no-project python -c "import torchcodec_xpu"
+        uv run --no-project python -c "import torchcodec_xpu; print(torchcodec_xpu.__version__)"

@@ -122,17 +122,17 @@ jobs:
       env:
         LD_LIBRARY_PATH: '${{ github.workspace }}/_install/ffmpeg-n6.1.4/lib'
       run: |
-        uv run --no-project python -c "import torchcodec_xpu"
+        uv run --no-project python -c "import torchcodec_xpu; print(torchcodec_xpu.__version__)"
     - name: 'Test importing torchcodec-xpu with ffmpeg n7'
       env:
         LD_LIBRARY_PATH: '${{ github.workspace }}/_install/ffmpeg-n7.1.3/lib'
       run: |
-        uv run --no-project python -c "import torchcodec_xpu"
+        uv run --no-project python -c "import torchcodec_xpu; print(torchcodec_xpu.__version__)"
     - name: 'Test importing torchcodec-xpu with ffmpeg n8'
       env:
         LD_LIBRARY_PATH: '${{ github.workspace }}/_install/ffmpeg-n8.0.1/lib'
       run: |
-        uv run --no-project python -c "import torchcodec_xpu"
+        uv run --no-project python -c "import torchcodec_xpu; print(torchcodec_xpu.__version__)"
     - name: 'Upload wheels'
       uses: actions/upload-artifact@v7
       with:
@@ -236,7 +236,7 @@ jobs:
     - name: 'Test torchcodec'
       run: |
         # TODO: actually run torchcodec tests
-        python -c "import torchcodec_xpu"
+        python -c "import torchcodec_xpu; print(torchcodec_xpu.__version__)"
 
   # TODO: change this placeholder to the actual job publishing artifacts to PyPI
   publish:

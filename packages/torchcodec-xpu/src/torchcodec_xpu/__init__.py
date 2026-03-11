@@ -9,6 +9,12 @@ import traceback
 import torch
 import torchcodec
 
+try:
+    # Note that version.py is generated during install
+    from ._version import __version__
+except ImportError:
+    __version__ = "unknown"
+
 
 def _get_extension_path(lib_name: str) -> str:
     spec = importlib.util.find_spec(lib_name)

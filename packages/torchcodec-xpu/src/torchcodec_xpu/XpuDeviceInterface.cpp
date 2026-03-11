@@ -60,11 +60,17 @@ inline bool use_sycl_color_conversion_kernel() {
   return false;
 #else
   if (!USE_SYCL_KERNELS) {
-    // By default attempt to convert with sycl (optimized path).
-    return true;
+    // TODO: By default attempt to convert with sycl (optimized path).
+    return false;
   }
   return to_bool(USE_SYCL_KERNELS);
 #endif
+}
+
+bool has_fp64(const torch::Device& device) {
+  int deviceIndex = getDeviceIndex(device);
+  sycl::device syclDevice = c10::xpu::get_raw_device(deviceIndex);
+  return syclDevice.has(sycl::aspect::fp64);
 }
 
 UniqueAVBufferRef getVaapiContext(const torch::Device& device) {
@@ -131,6 +137,9 @@ XpuDeviceInterface::XpuDeviceInterface(const torch::Device& device)
     VLOG(1) << "XpuDeviceInterface initialized with VAAPI filter graph backend";
     VLOG(1) << "Backend: VAAPI_FILTER (Flexible, with scaling)";
   }
+
+  has_fp64_ = has_fp64(device);
+  VLOG(1) << "Device supports FP64: " << has_fp64_;
 }
 
 XpuDeviceInterface::~XpuDeviceInterface() {
@@ -379,6 +388,9 @@ bool XpuDeviceInterface::convertAVFrameToFrameOutput_SYCL(
     [[maybe_unused]] torch::Tensor& dst) {
   bool converted = false;
   if (!use_sycl_color_conversion_kernel()) {
+    return converted;
+  }
+  if (!has_fp64_) {
     return converted;
   }
 

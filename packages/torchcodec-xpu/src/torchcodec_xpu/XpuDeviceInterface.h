@@ -41,6 +41,7 @@ class XpuDeviceInterface : public DeviceInterface {
  private:
   VideoStreamOptions videoStreamOptions_;
   AVRational timeBase_;
+  bool has_fp64_;
 
   UniqueAVBufferRef ctx_;
 

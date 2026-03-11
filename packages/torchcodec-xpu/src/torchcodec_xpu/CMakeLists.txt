@@ -33,6 +33,33 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(L0 REQUIRED IMPORTED_TARGET level-zero)
 pkg_check_modules(LIBVA REQUIRED IMPORTED_TARGET libva)
 
+if (NOT "$ENV{TORCH_XPU_ARCH_LIST}" STREQUAL "")
+    set(TORCH_XPU_ARCH_LIST "$ENV{TORCH_XPU_ARCH_LIST}")
+else()
+    execute_process(
+        COMMAND python3 -c "import torch; print(','.join(torch.xpu.get_arch_list()))"
+        OUTPUT_VARIABLE TORCH_XPU_ARCH_LIST
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE PYTHON_RESULT
+    )
+
+    if(NOT PYTHON_RESULT EQUAL 0)
+        message(WARNING "Failed to retrieve torch.xpu.get_arch_list()")
+    endif()
+endif()
+
+message(STATUS "Building for the following XPU architectures: ${TORCH_XPU_ARCH_LIST}")
+
+if (TORCH_XPU_ARCH_LIST)
+    # AOT (spir64_gen) + JIT (spir64)
+    set(SYCL_TARGETS -fsycl-targets=spir64_gen,spir64)
+    set(SYCL_DEVICE_LIST -Xs "-device ${TORCH_XPU_ARCH_LIST} -options -cl-poison-unsupported-fp64-kernels")
+else()
+    # JIT (spir64)
+    set(SYCL_TARGETS -fsycl-targets=spir64)
+    set(SYCL_DEVICE_LIST )
+endif()
+
 function(make_torchcodec_xpu_libraries torchcodec_variant)
     set(libname "xpu_ops${torchcodec_variant}")
     set(sources
@@ -65,10 +92,9 @@ function(make_torchcodec_xpu_libraries torchcodec_variant)
 
     if(WITH_SYCL_KERNELS)
         target_compile_definitions(${libname} PRIVATE WITH_SYCL_KERNELS=1)
-        target_compile_options(${libname} PRIVATE -fsycl)
-        target_link_options(${libname} PRIVATE -fsycl)
+        target_compile_options(${libname} PRIVATE -fsycl ${SYCL_TARGETS})
+        target_link_options(${libname} PRIVATE -fsycl ${SYCL_TARGETS} ${SYCL_DEVICE_LIST} --offload-compress)
     endif()
-
 
     install(
         TARGETS ${libname}

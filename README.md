@@ -31,7 +31,22 @@ decoder = torchcodec.decoders.VideoDecoder(
 
 * Install oneAPI [2025.3]
 
-* Install FFmpeg with enabled VAAPI hardware acceleration. For example:
+* Install FFmpeg development environment with enabled VAAPI hardware acceleration. For example:
+
+  * By installing FFmpeg provided by your Linux distribution. For Ubuntu:
+
+```
+apt-get update && apt-get install -y \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavfilter-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libswresample-dev \
+    libswscale-dev
+```
+
+  * By self-building FFmpeg from sources:
 
 ```
 git clone https://git.ffmpeg.org/ffmpeg.git && cd ffmpeg

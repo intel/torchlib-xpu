@@ -1,6 +1,6 @@
 [project]
 name = "torchlib-xpu"
-version = "0.0.1"
+version = "0.1.0"
 description = "Intel® XPU Library for PyTorch* Ecosystem Projects"
 readme = "README.md"
 requires-python = ">=3.10"

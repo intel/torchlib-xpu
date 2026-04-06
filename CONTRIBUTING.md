@@ -21,7 +21,7 @@ Submit a PR on Github to propose changes. Before doing so make sure that linter 
 Before running any checks, make sure to install the project with the test dependencies:
 
 ```
-uv venv && uv pip install torch~=2.10.0 -e ".[test]" \
+uv venv && uv pip install torch~=2.11.0 -e ".[test]" \
   --index https://download.pytorch.org/whl/xpu -vv
 ```
 
@@ -98,14 +98,16 @@ apt-get install \
 
 Use the following compatibility table when self-building the project and its dependencies:
 
-| PyTorch | Torchvision | oneAPI   |
-| ------- | ----------- | -------- |
-| 2.10    | 0.25        | [2025.3] |
-| 2.9     | 0.24        | [2025.2] |
-| 2.8     | 0.23        | [2025.1] |
+| PyTorch | Torchvision | oneAPI         |
+| ------- | ----------- | -------------- |
+| 2.11    | 0.26        | [2025.3][2-11] |
+| 2.10    | 0.25        | [2025.3][2-10] |
+| 2.9     | 0.24        | [2025.2][2-9]  |
+| 2.8     | 0.23        | [2025.1][2-8]  |
 
 [TorchCodec]: https://github.com/meta-pytorch/torchcodec
 
-[2025.3]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-10.html
-[2025.2]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-9.html
-[2025.1]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-8.html
+[2-11]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-11.html
+[2-10]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-10.html
+[2-9]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-9.html
+[2-8]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-8.html

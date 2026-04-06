@@ -1,4 +1,4 @@
-From 073c5d179a8f9ef93d2d613fd725e3cf289f7f74 Mon Sep 17 00:00:00 2001
+From e9a94cb8b8031d7dc31c49accbb54c2a9fc9ff16 Mon Sep 17 00:00:00 2001
 From: Edgar Romo Montiel <edgar.romo.montiel@intel.com>
 Date: Tue, 9 Dec 2025 14:36:08 -0800
 Subject: [PATCH] Add XPU support to tests
@@ -7,8 +7,8 @@ Signed-off-by: Edgar Romo Montiel <edgar.romo.montiel@intel.com>
 ---
  test/conftest.py | 19 +++++++++++++++++--
  test/test_ops.py | 14 ++++++++++++++
- test/utils.py    | 18 ++++++++++++++++++
- 3 files changed, 49 insertions(+), 2 deletions(-)
+ test/utils.py    | 19 +++++++++++++++++++
+ 3 files changed, 50 insertions(+), 2 deletions(-)
 
 diff --git a/test/conftest.py b/test/conftest.py
 index 0588f83..48d8700 100644
@@ -73,7 +73,7 @@ index 0588f83..48d8700 100644
 +    if torch.xpu.is_available():
 +        torch.xpu.set_rng_state(xpu_rng_state)
 diff --git a/test/test_ops.py b/test/test_ops.py
-index 0ec4515..bd8d5db 100644
+index ba7ceea..dbc16de 100644
 --- a/test/test_ops.py
 +++ b/test/test_ops.py
 @@ -47,6 +47,7 @@ from .utils import (
@@ -105,18 +105,19 @@ index 0ec4515..bd8d5db 100644
  class TestAudioDecoderOps:
      @pytest.mark.parametrize(
 diff --git a/test/utils.py b/test/utils.py
-index cd735cf..04e4eb1 100644
+index 1d95c3d..902b9cd 100644
 --- a/test/utils.py
 +++ b/test/utils.py
-@@ -13,6 +13,7 @@ import pytest
- 
- import torch
- 
-+import torchcodec_xpu
- from torchcodec._core import get_ffmpeg_library_versions
+@@ -16,6 +16,8 @@ from torchcodec._core import get_ffmpeg_library_versions
  from torchcodec.decoders import set_cuda_backend, VideoDecoder
  from torchcodec.decoders._video_decoder import _read_custom_frame_mappings
-@@ -28,6 +29,13 @@ def needs_cuda(test_item):
+ 
++import torchcodec_xpu
++
+ IS_WINDOWS = sys.platform in ("win32", "cygwin")
+ IN_GITHUB_CI = bool(os.getenv("GITHUB_ACTIONS"))
+ 
+@@ -27,6 +29,13 @@ def needs_cuda(test_item):
      return pytest.mark.needs_cuda(test_item)
  
  
@@ -130,7 +131,7 @@ index cd735cf..04e4eb1 100644
  # Decorator for skipping ffmpeg tests when ffmpeg cli isn't available. The tests are
  # effectively marked to be skipped in pytest_collection_modifyitems() of
  # conftest.py
-@@ -50,6 +58,7 @@ def all_supported_devices():
+@@ -49,6 +58,7 @@ def all_supported_devices():
          "cpu",
          pytest.param("cuda", marks=pytest.mark.needs_cuda),
          pytest.param(_CUDA_BETA_DEVICE_STR, marks=pytest.mark.needs_cuda),
@@ -138,7 +139,7 @@ index cd735cf..04e4eb1 100644
      )
  
  
-@@ -156,6 +165,15 @@ def assert_frames_equal(*args, **kwargs):
+@@ -144,6 +154,15 @@ def assert_frames_equal(*args, **kwargs):
                  )
              else:
                  torch.testing.assert_close(*args, **kwargs, atol=atol, rtol=0)

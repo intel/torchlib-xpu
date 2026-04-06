@@ -2,8 +2,8 @@
 requires = [
     "pybind11",
     "scikit-build-core>=0.10",
-    "torch~=2.10.0",  # WA: must be specified in root project with build-constraint-dependencies
-    "torchcodec~=0.10.0"
+    "torch~=2.11.0",  # WA: must be specified in root project with build-constraint-dependencies
+    "torchcodec~=0.11.0"
 ]
 build-backend = "scikit_build_core.build"
 
@@ -18,7 +18,7 @@ authors = [
 ]
 dynamic = ["version"]
 dependencies = [
-    "torchcodec~=0.10.0"
+    "torchcodec~=0.11.0"
 ]
 
 [project.urls]

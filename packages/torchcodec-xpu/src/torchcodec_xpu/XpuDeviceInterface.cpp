@@ -26,13 +26,13 @@ extern "C" {
 
 namespace facebook::torchcodec {
 
-namespace {
+namespace xpu {
 
 const char* USE_SYCL_KERNELS = std::getenv("USE_SYCL_KERNELS");
 
 static bool g_xpu = registerDeviceInterface(
-    DeviceInterfaceKey(torch::kXPU),
-    [](const torch::Device& device) { return new XpuDeviceInterface(device); });
+    DeviceInterfaceKey(StableDeviceType::XPU),
+    [](const StableDevice& device) { return new XpuDeviceInterface(device); });
 
 const int MAX_XPU_GPUS = 128;
 // Set to -1 to have an infinitely sized cache. Set it to 0 to disable caching.
@@ -67,13 +67,13 @@ inline bool use_sycl_color_conversion_kernel() {
 #endif
 }
 
-bool has_fp64(const torch::Device& device) {
+bool has_fp64(const StableDevice& device) {
   int deviceIndex = getDeviceIndex(device);
   sycl::device syclDevice = c10::xpu::get_raw_device(deviceIndex);
   return syclDevice.has(sycl::aspect::fp64);
 }
 
-UniqueAVBufferRef getVaapiContext(const torch::Device& device) {
+UniqueAVBufferRef getVaapiContext(const StableDevice& device) {
   enum AVHWDeviceType type = av_hwdevice_find_type_by_name("vaapi");
   TORCH_CHECK(type != AV_HWDEVICE_TYPE_NONE, "Failed to find vaapi device");
   int deviceIndex = getDeviceIndex(device);
@@ -103,34 +103,48 @@ UniqueAVBufferRef getVaapiContext(const torch::Device& device) {
   return UniqueAVBufferRef(ctx);
 }
 
-} // namespace
+torch::stable::Tensor allocateEmptyHWCTensor(
+    const FrameDims& frameDims,
+    const StableDevice& device) {
+  STD_TORCH_CHECK(
+      frameDims.height > 0, "height must be > 0, got: ", frameDims.height);
+  STD_TORCH_CHECK(
+      frameDims.width > 0, "width must be > 0, got: ", frameDims.width);
+  return torch::stable::empty(
+      {frameDims.height, frameDims.width, 3},
+      kStableUInt8,
+      std::nullopt,
+      device);
+}
 
-int getDeviceIndex(const torch::Device& device) {
+} // namespace xpu
+
+int getDeviceIndex(const StableDevice& device) {
   // PyTorch uses int8_t as its torch::DeviceIndex, but FFmpeg and XPU
   // libraries use int. So we use int, too.
   int deviceIndex = static_cast<int>(device.index());
   TORCH_CHECK(
-      deviceIndex >= -1 && deviceIndex < MAX_XPU_GPUS,
+      deviceIndex >= -1 && deviceIndex < xpu::MAX_XPU_GPUS,
       "Invalid device index = ",
       deviceIndex);
 
   return (deviceIndex == -1)? 0: deviceIndex;
 }
 
-XpuDeviceInterface::XpuDeviceInterface(const torch::Device& device)
+XpuDeviceInterface::XpuDeviceInterface(const StableDevice& device)
     : DeviceInterface(device) {
-  TORCH_CHECK(g_xpu, "XpuDeviceInterface was not registered!");
+  TORCH_CHECK(xpu::g_xpu, "XpuDeviceInterface was not registered!");
   TORCH_CHECK(
-      device_.type() == torch::kXPU, "Unsupported device: ", device_.str());
+      device_.type() == kStableXPU, "Unsupported device: must be XPU");
 
   // It is important for pytorch itself to create the xpu context. If ffmpeg
   // creates the context it may not be compatible with pytorch.
   // This is a dummy tensor to initialize the xpu context.
-  torch::Tensor dummyTensorForXpuInitialization = torch::empty(
-      {1}, torch::TensorOptions().dtype(torch::kUInt8).device(device_));
-  ctx_ = getVaapiContext(device_);
+  torch::stable::Tensor dummyTensorForXpuInitialization = torch::stable::empty(
+      {1}, kStableUInt8, std::nullopt, StableDevice(device));
+  ctx_ = xpu::getVaapiContext(device_);
 
-  if (use_sycl_color_conversion_kernel()) {
+  if (xpu::use_sycl_color_conversion_kernel()) {
     VLOG(1) << "XpuDeviceInterface initialized with SYCL kernel backend";
     VLOG(1) << "Backend: SYCL_KERNEL (Direct NV12→RGB)";
   } else {
@@ -138,13 +152,13 @@ XpuDeviceInterface::XpuDeviceInterface(const torch::Device& device)
     VLOG(1) << "Backend: VAAPI_FILTER (Flexible, with scaling)";
   }
 
-  has_fp64_ = has_fp64(device);
+  has_fp64_ = xpu::has_fp64(device);
   VLOG(1) << "Device supports FP64: " << has_fp64_;
 }
 
 XpuDeviceInterface::~XpuDeviceInterface() {
   if (ctx_) {
-    g_cached_hw_device_ctxs.addIfCacheHasCapacity(device_, std::move(ctx_));
+    xpu::g_cached_hw_device_ctxs.addIfCacheHasCapacity(device_, std::move(ctx_));
   }
 }
 
@@ -191,8 +205,8 @@ void deleter(DLManagedTensor* self) {
   free(self->dl_tensor.strides);
 }
 
-torch::Tensor AVFrameToTensor(
-    const torch::Device& device,
+torch::stable::Tensor AVFrameToTensor(
+    const StableDevice& device,
     const UniqueAVFrame& frame) {
   TORCH_CHECK_EQ(frame->format, AV_PIX_FMT_VAAPI);
 
@@ -281,9 +295,14 @@ torch::Tensor AVFrameToTensor(
   dl_dst->dl_tensor.strides = nullptr;
   dl_dst->dl_tensor.byte_offset = desc.layers[0].offset[0];
 
-  auto dst = at::fromDLPack(dl_dst.release());
-
-  return dst;
+  // torch::stable::Tensor(AtenTensorHandle) constructor steals the ownership, so
+  // we need to release at::Tensor after getting its handle.
+  auto dst = std::make_unique<at::Tensor>(at::fromDLPack(dl_dst.release()));
+  // From: https://github.com/pytorch/pytorch/blob/v2.11.0/torch/csrc/inductor/aoti_torch/utils.h#L32
+  // NOTE: this conversion migth get broken in the new PyTorch release which will
+  // likely result in the segmentation fault. If this will happen - update the conversion.
+  AtenTensorHandle dst_handle = reinterpret_cast<AtenTensorHandle>(dst.release());
+  return torch::stable::Tensor(dst_handle);
 }
 
 VADisplay getVaDisplayFromAV(UniqueAVFrame& avFrame) {
@@ -296,7 +315,7 @@ VADisplay getVaDisplayFromAV(UniqueAVFrame& avFrame) {
 void XpuDeviceInterface::convertAVFrameToFrameOutput(
     UniqueAVFrame& avFrame,
     FrameOutput& frameOutput,
-    std::optional<torch::Tensor> preAllocatedOutputTensor) {
+    std::optional<torch::stable::Tensor> preAllocatedOutputTensor) {
   // TODO: consider to copy handling of CPU frame from CUDA
   // TODO: consider to copy NV12 format check from CUDA
   TORCH_CHECK(
@@ -304,7 +323,7 @@ void XpuDeviceInterface::convertAVFrameToFrameOutput(
       "Expected format to be AV_PIX_FMT_VAAPI, got " +
           std::string(av_get_pix_fmt_name((AVPixelFormat)avFrame->format)));
   auto frameDims = FrameDims(avFrame->height, avFrame->width);
-  torch::Tensor& dst = frameOutput.data;
+  torch::stable::Tensor& dst = frameOutput.data;
   if (preAllocatedOutputTensor.has_value()) {
     auto shape = preAllocatedOutputTensor.value().sizes();
     TORCH_CHECK(
@@ -315,10 +334,13 @@ void XpuDeviceInterface::convertAVFrameToFrameOutput(
         "x",
         frameDims.width,
         "x3, got ",
-        shape);
+        intArrayRefToString(shape));
     dst = preAllocatedOutputTensor.value();
   } else {
-    dst = allocateEmptyHWCTensor(frameDims, device_);
+    // Excplicitly load the version defined in facebook::torchcodec::xpu
+    // namespace as facebook::torchcodec defines the same but with the linkage
+    // type which we can't use.
+    dst = xpu::allocateEmptyHWCTensor(frameDims, device_);
   }
 
   auto start = std::chrono::high_resolution_clock::now();
@@ -335,7 +357,7 @@ void XpuDeviceInterface::convertAVFrameToFrameOutput(
 
 void XpuDeviceInterface::convertAVFrameToFrameOutput_FilterGraph(
     UniqueAVFrame& avFrame,
-    torch::Tensor& dst) {
+    torch::stable::Tensor& dst) {
   VLOG(1) << "Using VAAPI filter graph backend for conversion";
   auto frameDims = FrameDims(avFrame->height, avFrame->width);
 
@@ -348,16 +370,16 @@ void XpuDeviceInterface::convertAVFrameToFrameOutput_FilterGraph(
   // conversion objects as much as possible for performance reasons.
   enum AVPixelFormat frameFormat =
       static_cast<enum AVPixelFormat>(avFrame->format);
-  FiltersContext filtersContext;
+  FiltersConfig filtersConfig;
 
-  filtersContext.inputWidth = avFrame->width;
-  filtersContext.inputHeight = avFrame->height;
-  filtersContext.inputFormat = frameFormat;
-  filtersContext.inputAspectRatio = avFrame->sample_aspect_ratio;
+  filtersConfig.inputWidth = avFrame->width;
+  filtersConfig.inputHeight = avFrame->height;
+  filtersConfig.inputFormat = frameFormat;
+  filtersConfig.inputAspectRatio = avFrame->sample_aspect_ratio;
   // Actual output color format will be set via filter options
-  filtersContext.outputFormat = AV_PIX_FMT_VAAPI;
-  filtersContext.timeBase = timeBase_;
-  filtersContext.hwFramesCtx.reset(av_buffer_ref(avFrame->hw_frames_ctx));
+  filtersConfig.outputFormat = AV_PIX_FMT_VAAPI;
+  filtersConfig.timeBase = timeBase_;
+  filtersConfig.hwFramesCtx.reset(av_buffer_ref(avFrame->hw_frames_ctx));
 
   std::stringstream filters;
   filters << "scale_vaapi=" << frameDims.width << ":" << frameDims.height;
@@ -365,29 +387,29 @@ void XpuDeviceInterface::convertAVFrameToFrameOutput_FilterGraph(
   // We are doing the same to match.
   filters << ":format=rgba:out_range=pc";
 
-  filtersContext.filtergraphStr = filters.str();
+  filtersConfig.filtergraphStr = filters.str();
 
-  if (!filterGraphContext_ || prevFiltersContext_ != filtersContext) {
-    filterGraphContext_ =
-        std::make_unique<FilterGraph>(filtersContext, videoStreamOptions_);
-    prevFiltersContext_ = std::move(filtersContext);
+  if (!filterGraph_ || prevFiltersConfig_ != filtersConfig) {
+    filterGraph_ =
+        std::make_unique<FilterGraph>(filtersConfig, videoStreamOptions_);
+    prevFiltersConfig_ = std::move(filtersConfig);
   }
 
   // We convert input to the RGBX color format with VAAPI getting WxHx4
   // tensor on the output.
-  UniqueAVFrame filteredAVFrame = filterGraphContext_->convert(avFrame);
+  UniqueAVFrame filteredAVFrame = filterGraph_->convert(avFrame);
 
   TORCH_CHECK_EQ(filteredAVFrame->format, AV_PIX_FMT_VAAPI);
 
-  torch::Tensor dst_rgb4 = AVFrameToTensor(device_, filteredAVFrame);
-  dst.copy_(dst_rgb4.narrow(2, 0, 3));
+  torch::stable::Tensor dst_rgb4 = AVFrameToTensor(device_, filteredAVFrame);
+  torch::stable::copy_(dst, torch::stable::narrow(dst_rgb4, 2, 0, 3));
 }
 
 bool XpuDeviceInterface::convertAVFrameToFrameOutput_SYCL(
     [[maybe_unused]] UniqueAVFrame& frame,
-    [[maybe_unused]] torch::Tensor& dst) {
+    [[maybe_unused]] torch::stable::Tensor& dst) {
   bool converted = false;
-  if (!use_sycl_color_conversion_kernel()) {
+  if (!xpu::use_sycl_color_conversion_kernel()) {
     return converted;
   }
   if (!has_fp64_) {

@@ -116,8 +116,9 @@ jobs:
     - name: 'Test installing wheels'
       run: |
         uv venv
-        uv pip install _wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/*.whl -vv
-        uv pip install torch~=2.10.0 --index https://download.pytorch.org/whl/xpu -vv
+        uv pip install torch~=2.11.0 \
+          _wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/*.whl \
+          --index https://download.pytorch.org/whl/xpu -vv
     - name: 'Test importing torchcodec-xpu with ffmpeg n6'
       env:
         LD_LIBRARY_PATH: '${{ github.workspace }}/_install/ffmpeg-n6.1.4/lib'
@@ -232,7 +233,7 @@ jobs:
     - name: 'Install torchcodec'
       run: |
         find _wheels/ -name "*.whl"
-        pip install torch~=2.10.0 \
+        pip install torch~=2.11.0 \
           ./_wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/torchcodec*.whl \
           --extra-index-url https://download.pytorch.org/whl/xpu
     - name: 'Test torchcodec'

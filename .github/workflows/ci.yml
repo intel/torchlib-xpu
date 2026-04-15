@@ -208,7 +208,9 @@ jobs:
         auto-update-conda: true
         python-version: ${{ matrix.python-version }}
         activate-environment: test-env
-        channels: conda-forge,defaults
+        channels: conda-forge
+        channel-priority: strict
+        conda-remove-defaults: true
     - name: 'Install Intel drivers'
       run: |
         # Using datacenter LTS setup for the maximum CI stability. Alternatively

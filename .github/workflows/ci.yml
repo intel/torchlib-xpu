@@ -189,41 +189,68 @@ jobs:
     strategy:
       matrix:
         ffmpeg-version: [ '6', '7', '8' ]
-        python-version: [ '3.10', '3.11', '3.12', '3.13', '3.14' ]
-    # TODO: change to Intel GPU capable runner
-    runs-on: ubuntu-24.04
+        # Testing in minimum and maximum supported versions of python.
+        python-version: [ '3.10', '3.14' ]
+        runner: [ 'bmg' ]
+    runs-on: ${{matrix.runner}}
+    container:
+      image: 'ubuntu:24.04'
+      options: --device /dev/dri:/dev/dri -v /dev/dri/by-path:/dev/dri/by-path
     env:
       WHEELS: torchlib-${{ matrix.python-version }}-wheels
     defaults:
       run:
         shell: bash -l {0}  # for conda environment activation
     steps:
+    - name: 'Install prerequisites'
+      run: |
+        apt-get update
+        apt-get install -y \
+          ca-certificates \
+          curl \
+          git \
+          gpg \
+          software-properties-common \
+          wget
+        git config --global user.email "nobody@intel.com"
+        git config --global user.name "Nobody"
     - name: 'Download wheels'
       uses: actions/download-artifact@v8
       with:
         name: ${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}
         path: _wheels/
+    - name: 'Checkout'
+      uses: actions/checkout@v6
+      with:
+        path: torchlib-xpu
+    - name: 'Checkout'
+      uses: actions/checkout@v6
+      with:
+        repository: meta-pytorch/torchcodec
+        ref: v0.11.1
+        path: torchcodec
     - name: 'Setup Conda'
       uses: conda-incubator/setup-miniconda@v3
       with:
-        auto-update-conda: true
-        python-version: ${{ matrix.python-version }}
-        activate-environment: test-env
+        # conda configuration
+        auto-update-conda: false
         channels: conda-forge
         channel-priority: strict
         conda-remove-defaults: true
+        miniforge-version: latest
+        use-mamba: true
+        # environment configuration
+        activate-environment: test-env
+        python-version: ${{ matrix.python-version }}
     - name: 'Install Intel drivers'
       run: |
-        # Using datacenter LTS setup for the maximum CI stability. Alternatively
-        # we could use kobuk PPA, but it does not give us LTS.
-        wget -qO - https://repositories.intel.com/gpu/intel-graphics.key |
-          sudo gpg --yes --dearmor --output /usr/share/keyrings/intel-graphics.gpg
-        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu noble/lts/2523 unified" | \
-          sudo tee /etc/apt/sources.list.d/intel-gpu-noble.list
-        sudo apt-get update
-        sudo apt-get install -y \
+        add-apt-repository -y ppa:kobuk-team/intel-graphics
+        apt-get install -y \
           libva2 \
-          libze1
+          libze1 \
+          libze-intel-gpu1 \
+          intel-media-va-driver-non-free \
+          intel-opencl-icd
     - name: 'Install FFmpeg ${{ matrix.ffmpeg-version }}'
       run: |
         conda install ffmpeg=${{ matrix.ffmpeg-version }} pip
@@ -234,12 +261,23 @@ jobs:
       run: |
         find _wheels/ -name "*.whl"
         pip install torch~=2.11.0 \
-          ./_wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/torchcodec*.whl \
+          "$(ls ./_wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/torchcodec*.whl)[test]" \
           --extra-index-url https://download.pytorch.org/whl/xpu
-    - name: 'Test torchcodec'
+    - name: 'Test gpu'
       run: |
-        # TODO: actually run torchcodec tests
-        python -c "import torchcodec_xpu; print(torchcodec_xpu.__version__)"
+        python -c "import torch; print(torch.xpu.is_available())"
+    - name: 'Patch torchcodec'
+      working-directory: torchcodec
+      run: |
+        git am ../torchlib-xpu/packages/torchcodec-xpu/patches/0001-Add-XPU-support-to-tests.patch
+    - name: 'Test'
+      working-directory: torchcodec
+      run: |
+        if [ "${{matrix.runner}}" == "dg2" ]; then
+          # https://github.com/intel/media-driver/issues/1954
+          known_failures="not test_get_frame_at_av1[xpu]"
+        fi
+        pytest -rsf -k "${known_failures}" test/
 
   # TODO: change this placeholder to the actual job publishing artifacts to PyPI
   publish:

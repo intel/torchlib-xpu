@@ -29,6 +29,7 @@ test = [
     "numpy",
     "pytest",
     "torcheval",
+    "torchvision",
 ]
 
 [tool.scikit-build]

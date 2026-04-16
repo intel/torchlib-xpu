@@ -28,9 +28,6 @@ jobs:
       security-events: write
       # Needed to publish results and get a badge (see publish_results below).
       id-token: write
-      # Uncomment the permissions below if installing in a private repository.
-      # contents: read
-      # actions: read
 
     steps:
       - name: "Checkout code"
@@ -49,13 +46,10 @@ jobs:
           # To create the PAT, follow the steps in https://github.com/ossf/scorecard-action?tab=readme-ov-file#authentication-with-fine-grained-pat-optional.
           # repo_token: ${{ secrets.SCORECARD_TOKEN }}
 
-          # Public repositories:
-          #   - Publish results to OpenSSF REST API for easy access by consumers
-          #   - Allows the repository to include the Scorecard badge.
-          #   - See https://github.com/ossf/scorecard-action#publishing-results.
-          # For private repositories:
-          #   - `publish_results` will always be set to `false`, regardless
-          #     of the value entered here.
+          # Publishing results to OpenSSF REST API will allow us:
+          #   - To give easy access to results by consumers
+          #   - To include the Scorecard badge in the repository
+          # See https://github.com/ossf/scorecard-action#publishing-results
           publish_results: true
 
           # (Optional) Uncomment file_mode if you have a .gitattributes with files marked export-ignore
@@ -70,8 +64,7 @@ jobs:
           path: results.sarif
           retention-days: 5
 
-      # Upload the results to GitHub's code scanning dashboard (optional).
-      # Commenting out will disable upload of results to your repo's Code Scanning dashboard
+      # Upload the results to GitHub's code scanning dashboard.
       - name: "Upload to code-scanning"
         uses: github/codeql-action/upload-sarif@v3
         with:

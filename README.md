@@ -1,3 +1,5 @@
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/{owner}/{repo}/badge)](https://api.securityscorecards.dev/projects/github.com/{owner}/{repo})
+
 # Intel® XPU Library for PyTorch* Ecosystem Projects
 
 This project contains a set of plugins for PyTorch* ecosystem libraries which enable hardware acceleration on Intel® GPUs thru the `xpu` PyTorch* device backend. The goal of the project is to:

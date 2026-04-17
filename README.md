@@ -1,4 +1,4 @@
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/intel/torchlib-xpu/badge)](https://api.securityscorecards.dev/projects/github.com/intel/torchlib-xpu)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/intel/torchlib-xpu/badge)](https://scorecard.dev/viewer/?uri=github.com/intel/torchlib-xpu)
 
 # Intel® XPU Library for PyTorch* Ecosystem Projects
 

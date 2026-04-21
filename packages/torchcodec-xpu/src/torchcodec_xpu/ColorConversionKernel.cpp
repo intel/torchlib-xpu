@@ -9,17 +9,19 @@ namespace facebook::torchcodec {
 
 using float3x3 = std::array<sycl::float3, 3>;
 
-const float3x3 rgb_matrix_bt709 = {
-  sycl::float3{ 1.0, 0.0, 1.5748 },
-  sycl::float3{ 1.0, -0.187324, -0.468124 },
-  sycl::float3{ 1.0, 1.8556, 0.0 }
-};
+struct rgb_matrix {
+  static constexpr float3x3 BT709 = {
+    sycl::float3{ 1.0, 0.0, 1.5748 },
+    sycl::float3{ 1.0, -0.187324, -0.468124 },
+    sycl::float3{ 1.0, 1.8556, 0.0 }
+  };
 
-//const sycl::float3 rgb_matrix_bt601[3] = {
-//  { 1.0, 0.0, 1.402 },
-//  { 1.0, -0.344136, -0.714136 },
-//  { 1.0, 1.772, 0.0}
-//};
+  static constexpr float3x3 BT601 = {
+    sycl::float3{ 1.0, 0.0, 1.402 },
+    sycl::float3{ 1.0, -0.344136, -0.714136 },
+    sycl::float3{ 1.0, 1.772, 0.0}
+  };
+};
 
 // Helper function for the Intel Tile-Y offset calculation
 // Intel Y-Tiling uses COLUMN-MAJOR OWord (16 bytes) organization
@@ -107,7 +109,7 @@ struct NV12toRGBKernel {
   int height;
   int stride;
   bool fullrange;
-  float3x3 rgb_matrix;
+  const float3x3 rgb_matrix;
 
   NV12toRGBKernel(
       const uint8_t* y_plane,
@@ -157,6 +159,13 @@ struct NV12toRGBKernel {
   }
 };
 
+const float3x3 getColorConversionMatrix(enum AVColorSpace colorspace) {
+  if (colorspace == AVCOL_SPC_BT709) {
+      return rgb_matrix::BT709;
+  }
+  return rgb_matrix::BT601;
+}
+
 void convertNV12ToRGB(
     sycl::queue& queue,
     const uint8_t* y_plane,
@@ -165,12 +174,14 @@ void convertNV12ToRGB(
     int width,
     int height,
     int stride,
-    bool fullrange) {
+    enum AVColorRange color_range,
+    enum AVColorSpace colorspace) {
+  bool fullrange = (color_range == AVCOL_RANGE_JPEG);
   queue.submit([&](sycl::handler& cgh) {
     NV12toRGBKernel kernel(
       y_plane, uv_plane, rgb_output,
       width, height, stride,
-      fullrange, rgb_matrix_bt709);
+      fullrange, getColorConversionMatrix(colorspace));
 
     cgh.parallel_for(
         sycl::range<2>(height, width),

@@ -7,6 +7,10 @@
 #include <sycl/sycl.hpp>
 #include <cstdint>
 
+extern "C" {
+#include <libavutil/pixfmt.h>
+}
+
 namespace facebook::torchcodec {
 
 void convertNV12ToRGB(
@@ -17,7 +21,8 @@ void convertNV12ToRGB(
     int width,
     int height,
     int stride,
-    bool fullrange = 1);
+    enum AVColorRange color_range,
+    enum AVColorSpace colorspace);
 
 // Anchor function to force kernel registration
 void registerColorConversionKernel();

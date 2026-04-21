@@ -60,8 +60,7 @@ inline bool use_sycl_color_conversion_kernel() {
   return false;
 #else
   if (!USE_SYCL_KERNELS) {
-    // TODO: By default attempt to convert with sycl (optimized path).
-    return false;
+    return true;
   }
   return to_bool(USE_SYCL_KERNELS);
 #endif
@@ -475,7 +474,8 @@ bool XpuDeviceInterface::convertAVFrameToFrameOutput_SYCL(
       frame->width,
       frame->height,
       desc.layers[0].pitch[0],
-      false);
+      frame->color_range,
+      frame->colorspace);
 
   zeMemFree(context->zeCtx, usm_ptr);
   converted = true;

@@ -71,6 +71,13 @@ bool has_fp64(const StableDevice& device) {
   return syclDevice.has(sycl::aspect::fp64);
 }
 
+sycl::ext::oneapi::experimental::architecture getArchitecture(
+    const StableDevice& device) {
+  sycl::queue queue = c10::xpu::getCurrentXPUStream(device.index());
+  return queue.get_device().get_info<
+      sycl::ext::oneapi::experimental::info::device::architecture>();
+}
+
 // Resolves the VAAPI render-node path this XPU device should open.
 std::string resolveRenderD(const StableDevice& device) {
   std::string renderD = "/dev/dri/renderD128";
@@ -175,7 +182,14 @@ XpuDeviceInterface::XpuDeviceInterface(const StableDevice& device)
   // This is a dummy tensor to initialize the xpu context.
   torch::stable::Tensor dummyTensorForXpuInitialization = torch::stable::empty(
       {1}, kStableUInt8, std::nullopt, StableDevice(device));
-  ctx_ = xpu::getVaapiContext(device_);
+
+  auto arch = xpu::getArchitecture(device);
+  // Checking for devices which don't have HW media engines so we can skip
+  // initialization of VAAPI context.
+  if (arch != sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc &&
+      arch != sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc_vg) {
+      ctx_ = xpu::getVaapiContext(device_);
+  }
 
   if (xpu::use_sycl_color_conversion_kernel()) {
     VLOG(1) << "XpuDeviceInterface initialized with SYCL kernel backend";
@@ -213,7 +227,10 @@ void XpuDeviceInterface::initializeVideo(
 
 void XpuDeviceInterface::registerHardwareDeviceWithCodec(
     AVCodecContext* codecContext) {
-  TORCH_CHECK(ctx_, "FFmpeg HW device has not been initialized");
+  if (!ctx_) {
+    VLOG(1) << "HW context not initialized, falling back to CPU";
+    return;
+  }
   TORCH_CHECK(codecContext != nullptr, "codecContext is null");
   codecContext->hw_device_ctx = av_buffer_ref(ctx_.get());
 }

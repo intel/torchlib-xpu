@@ -195,6 +195,9 @@ jobs:
     runs-on: ${{matrix.runner}}
     container:
       image: 'ubuntu:24.04'
+      credentials:
+        username: ${{vars.DH_USER}}
+        password: ${{secrets.DH_TOKEN}}
       options: --device /dev/dri:/dev/dri -v /dev/dri/by-path:/dev/dri/by-path
     env:
       WHEELS: torchlib-${{ matrix.python-version }}-wheels

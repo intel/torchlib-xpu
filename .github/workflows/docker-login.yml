@@ -1,0 +1,24 @@
+name: Docker Registry Login
+
+on:
+  workflow_dispatch:
+    inputs:
+      runners:
+        description: 'Comma-separated runner labels (e.g., bmg, dg2)'
+        required: true
+        default: '["bmg","dg2"]'
+        type: string
+
+jobs:
+  docker-login:
+    runs-on: ${{matrix.runner }}
+    strategy:
+      matrix:
+        runner: ${{ fromJson(github.event.inputs.runners) }}
+    steps:
+      - name: Log in to Docker Registry
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DH_USER }}
+          password: ${{ secrets.DH_TOKEN }}
+          logout: false

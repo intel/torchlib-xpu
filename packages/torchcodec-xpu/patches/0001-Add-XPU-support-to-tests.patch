@@ -1,4 +1,4 @@
-From e9a94cb8b8031d7dc31c49accbb54c2a9fc9ff16 Mon Sep 17 00:00:00 2001
+From bb3213bed69895fccb60ddefb25a5c26b9d90356 Mon Sep 17 00:00:00 2001
 From: Edgar Romo Montiel <edgar.romo.montiel@intel.com>
 Date: Tue, 9 Dec 2025 14:36:08 -0800
 Subject: [PATCH] Add XPU support to tests
@@ -11,7 +11,7 @@ Signed-off-by: Edgar Romo Montiel <edgar.romo.montiel@intel.com>
  3 files changed, 50 insertions(+), 2 deletions(-)
 
 diff --git a/test/conftest.py b/test/conftest.py
-index 0588f83..48d8700 100644
+index 0588f83b..48d87001 100644
 --- a/test/conftest.py
 +++ b/test/conftest.py
 @@ -15,6 +15,9 @@ def pytest_configure(config):
@@ -73,20 +73,20 @@ index 0588f83..48d8700 100644
 +    if torch.xpu.is_available():
 +        torch.xpu.set_rng_state(xpu_rng_state)
 diff --git a/test/test_ops.py b/test/test_ops.py
-index ba7ceea..dbc16de 100644
+index beed4a42..f30bdfa5 100644
 --- a/test/test_ops.py
 +++ b/test/test_ops.py
-@@ -47,6 +47,7 @@ from .utils import (
-     NASA_AUDIO_MP3,
+@@ -60,6 +60,7 @@ from .utils import (
      NASA_VIDEO,
+     NASA_VIDEO_HDR,
      needs_cuda,
 +    needs_xpu,
      needs_ffmpeg_cli,
      SINE_MONO_S32,
      SINE_MONO_S32_44100,
-@@ -650,6 +651,19 @@ class TestVideoDecoderOps:
-             duration, torch.tensor(0.0334).double(), atol=0, rtol=1e-3
-         )
+@@ -829,6 +830,19 @@ class TestVideoDecoderOps:
+         for frame, idx in zip(frames, indices):
+             self._assert_float32_matches_rgb48_ref(frame, asset, idx)
  
 +    @needs_xpu
 +    def test_xpu_decoder(self):
@@ -105,7 +105,7 @@ index ba7ceea..dbc16de 100644
  class TestAudioDecoderOps:
      @pytest.mark.parametrize(
 diff --git a/test/utils.py b/test/utils.py
-index 1d95c3d..902b9cd 100644
+index 9e673510..3f4cd223 100644
 --- a/test/utils.py
 +++ b/test/utils.py
 @@ -16,6 +16,8 @@ from torchcodec._core import get_ffmpeg_library_versions
@@ -134,7 +134,7 @@ index 1d95c3d..902b9cd 100644
 @@ -49,6 +58,7 @@ def all_supported_devices():
          "cpu",
          pytest.param("cuda", marks=pytest.mark.needs_cuda),
-         pytest.param(_CUDA_BETA_DEVICE_STR, marks=pytest.mark.needs_cuda),
+         pytest.param(_CUDA_FFMPEG_DEVICE_STR, marks=pytest.mark.needs_cuda),
 +        pytest.param("xpu", marks=pytest.mark.needs_xpu),
      )
  

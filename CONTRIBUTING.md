@@ -21,7 +21,7 @@ Submit a PR on Github to propose changes. Before doing so make sure that linter 
 Before running any checks, make sure to install the project with the test dependencies:
 
 ```
-uv venv && uv pip install torch~=2.11.0 -e ".[test]" \
+uv venv && uv pip install torch -e ".[test]" \
   --index https://download.pytorch.org/whl/xpu -vv
 ```
 
@@ -41,7 +41,7 @@ git clone https://github.com/meta-pytorch/torchcodec.git && cd torchcodec
 git am $TORCHCODEC_XPU_PATH/patches/0001-Add-XPU-support-to-tests.patch
 ```
 
-The patch file can be reviewed [here](packages/torchcodec-xpu/patches/0001-Add-XPU-support-to-tests.patch). The patch is known to apply clean on the following TorchCodec versions: `v0.11.1`.
+The patch file can be reviewed [here](packages/torchcodec-xpu/patches/0001-Add-XPU-support-to-tests.patch). The patch is known to apply clean on the following TorchCodec versions: `v0.12.0`.
 
 TorchCodec tests require some additional packages. Install them as follows:
 
@@ -100,6 +100,7 @@ Use the following compatibility table when self-building the project and its dep
 
 | PyTorch | Torchvision | oneAPI         |
 | ------- | ----------- | -------------- |
+| 2.12    | 0.27        | [2025.3][2-12] |
 | 2.11    | 0.26        | [2025.3][2-11] |
 | 2.10    | 0.25        | [2025.3][2-10] |
 | 2.9     | 0.24        | [2025.2][2-9]  |
@@ -107,6 +108,7 @@ Use the following compatibility table when self-building the project and its dep
 
 [TorchCodec]: https://github.com/meta-pytorch/torchcodec
 
+[2-12]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-12.html
 [2-11]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-11.html
 [2-10]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-10.html
 [2-9]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-9.html

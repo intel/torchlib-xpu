@@ -11,7 +11,7 @@ on:
 
 jobs:
   docker-login:
-    runs-on: ${{matrix.runner }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         runner: ${{ fromJson(github.event.inputs.runners) }}

@@ -9,6 +9,8 @@ on:
         default: '["bmg","dg2"]'
         type: string
 
+permissions: read-all
+
 jobs:
   docker-login:
     runs-on: ${{ matrix.runner }}

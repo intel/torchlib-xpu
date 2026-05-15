@@ -192,11 +192,20 @@ jobs:
         # Testing in minimum and maximum supported versions of python.
         python-version: [ '3.10', '3.14' ]
         runner: [ 'bmg', 'dg2' ]
+        # Default fallback value for standard matrix combinations
+        cpu_fallback: [ false ]
+
+        include:
+        - ffmpeg-version: '8'
+          python-version: '3.14'
+          runner: 'bmg'
+          cpu_fallback: true
     runs-on: ${{matrix.runner}}
     container:
       image: 'ubuntu:24.04'
       options: --device /dev/dri:/dev/dri -v /dev/dri/by-path:/dev/dri/by-path
     env:
+      FORCE_CPU_FALLBACK: ${{ matrix.cpu_fallback == true }}
       WHEELS: torchlib-${{ matrix.python-version }}-wheels
     defaults:
       run:
@@ -273,8 +282,8 @@ jobs:
     - name: 'Test'
       working-directory: torchcodec
       run: |
-        if [ "${{matrix.runner}}" == "dg2" ]; then
-          # https://github.com/intel/media-driver/issues/1954
+        if [ "$FORCE_CPU_FALLBACK" == "true" ] || [ "${{matrix.runner}}" == "dg2" ]; then
+          # On dg2 see: https://github.com/intel/media-driver/issues/1954
           known_failures="not test_get_frame_at_av1[xpu]"
         fi
         pytest -rsf -k "${known_failures}" test/

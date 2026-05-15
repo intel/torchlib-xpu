@@ -28,6 +28,7 @@ namespace facebook::torchcodec {
 namespace xpu {
 
 const char* USE_SYCL_KERNELS = std::getenv("USE_SYCL_KERNELS");
+const char* FORCE_CPU_FALLBACK = std::getenv("FORCE_CPU_FALLBACK");
 
 static bool g_xpu = registerDeviceInterface(
     DeviceInterfaceKey(StableDeviceType::XPU),
@@ -63,6 +64,13 @@ inline bool use_sycl_color_conversion_kernel() {
   }
   return to_bool(USE_SYCL_KERNELS);
 #endif
+}
+
+inline bool force_cpu_fallback() {
+  if (!FORCE_CPU_FALLBACK) {
+    return false;
+  }
+  return to_bool(FORCE_CPU_FALLBACK);
 }
 
 bool has_fp64(const StableDevice& device) {
@@ -127,36 +135,6 @@ torch::stable::Tensor allocateEmptyHWCTensor(
       device);
 }
 
-// Self-contained SW NV12/YUV->RGB24 conversion for the CPU fallback path.
-// Uses libswscale directly rather than delegating to CpuDeviceInterface: the
-// relevant torchcodec symbols (CpuDeviceInterface ctor, createDeviceInterface)
-// are not exported from the installed libtorchcodec_core6.so, so delegation is
-// not linkable against the shipped wheel.
-void convertSWFrameToRGB_sws(
-    AVFrame* avFrame,
-    torch::stable::Tensor& dstRGB_CPU) {
-  const int width = avFrame->width;
-  const int height = avFrame->height;
-  auto srcFormat = static_cast<AVPixelFormat>(avFrame->format);
-
-  SwsContext* sws = sws_getContext(width, height, srcFormat, width, height,
-      AV_PIX_FMT_RGB24, SWS_BILINEAR, nullptr, nullptr, nullptr);
-  TORCH_CHECK(
-      sws != nullptr, "sws_getContext failed for ", av_get_pix_fmt_name(srcFormat),
-      " -> RGB24 at ", width, "x",
-      height);
-
-  uint8_t* dstData[4] = {static_cast<uint8_t*>(dstRGB_CPU.mutable_data_ptr()),
-      nullptr, nullptr, nullptr};
-  int dstLinesize[4] = {width * 3, 0, 0, 0};
-
-  int scaled = sws_scale(sws, avFrame->data, avFrame->linesize, 0,
-      height, dstData, dstLinesize);
-  sws_freeContext(sws);
-  TORCH_CHECK(
-      scaled == height, "sws_scale produced ", scaled, " lines, expected ", height);
-}
-
 } // namespace xpu
 
 int getDeviceIndex(const StableDevice& device) {
@@ -184,11 +162,13 @@ XpuDeviceInterface::XpuDeviceInterface(const StableDevice& device)
       {1}, kStableUInt8, std::nullopt, StableDevice(device));
 
   auto arch = xpu::getArchitecture(device);
-  // Checking for devices which don't have HW media engines so we can skip
-  // initialization of VAAPI context.
-  if (arch != sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc &&
+  if (!xpu::force_cpu_fallback()) {
+    // Checking for devices which don't have HW media engines so we can skip
+    // initialization of VAAPI context.
+    if (arch != sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc &&
       arch != sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc_vg) {
       ctx_ = xpu::getVaapiContext(device_);
+    }
   }
 
   if (xpu::use_sycl_color_conversion_kernel()) {
@@ -216,6 +196,13 @@ void XpuDeviceInterface::initialize(
   TORCH_CHECK(avStream != nullptr, "avStream is null");
   codecContext_ = codecContext;
   timeBase_ = avStream->time_base;
+
+  cpuInterface_ = createDeviceInterface(kStableCPU);
+  STD_TORCH_CHECK(
+      cpuInterface_ != nullptr, "Failed to create CPU device interface");
+  cpuInterface_->initialize(avStream, avFormatCtx, codecContext);
+  cpuInterface_->initializeVideo(
+      VideoStreamOptions(), {}, /*resizedOutputDims=*/std::nullopt);
 }
 
 void XpuDeviceInterface::initializeVideo(
@@ -369,25 +356,17 @@ void XpuDeviceInterface::convertAVFrameToFrameOutput(
     // general or on this particular device. In this case we have a frame on the
     // CPU. We send the frame back to the XPU device when we're done.
 
-    // Self-contained SW->RGB conversion via libswscale. We do not delegate to
-    // CpuDeviceInterface because its constructor and the createDeviceInterface
-    // factory are not exported from the installed libtorchcodec_core wheel.
-    auto frameDims = FrameDims(avFrame->height, avFrame->width);
-    torch::stable::Tensor cpuRGB = torch::stable::empty(
-        {frameDims.height, frameDims.width, 3},
-        kStableUInt8,
-        std::nullopt,
-        StableDevice(kStableCPU));
-    xpu::convertSWFrameToRGB_sws(avFrame.get(), cpuRGB);
+    FrameOutput cpuFrameOutput;
+    cpuInterface_->convertAVFrameToFrameOutput(avFrame, cpuFrameOutput);
 
     // Finally, we need to send the frame back to the GPU. Note that the
     // pre-allocated tensor is on the GPU, so we can't send that to the CPU
     // device interface. We copy it over here.
     if (preAllocatedOutputTensor.has_value()) {
-      torch::stable::copy_(preAllocatedOutputTensor.value(), cpuRGB);
+      torch::stable::copy_(preAllocatedOutputTensor.value(), cpuFrameOutput.data);
       frameOutput.data = preAllocatedOutputTensor.value();
     } else {
-      frameOutput.data = torch::stable::to(cpuRGB, device_);
+      frameOutput.data = torch::stable::to(cpuFrameOutput.data, device_);
     }
     return;
   }

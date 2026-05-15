@@ -39,6 +39,10 @@ class XpuDeviceInterface : public DeviceInterface {
           std::nullopt) override;
 
  private:
+  // We sometimes encounter frames that cannot be decoded on the XPU device.
+  // Rather than erroring out, we decode them on the CPU.
+  std::unique_ptr<DeviceInterface> cpuInterface_;
+
   VideoStreamOptions videoStreamOptions_;
   AVRational timeBase_;
   bool has_fp64_;

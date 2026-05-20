@@ -11,7 +11,15 @@ name: ci
 # we would need to setup Intel driver stack ourselves while pytorch
 # container handles this for us though it weighs more.
 
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
 
 permissions: read-all
 

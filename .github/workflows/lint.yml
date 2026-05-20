@@ -1,6 +1,14 @@
 name: lint
 
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
 
 permissions: read-all
 

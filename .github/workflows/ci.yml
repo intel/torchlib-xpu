@@ -124,7 +124,7 @@ jobs:
     - name: 'Test installing wheels'
       run: |
         uv venv
-        uv pip install torch~=2.12.0 \
+        uv pip install \
           _wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/*.whl \
           --index https://download.pytorch.org/whl/xpu -vv
     - name: 'Test importing torchcodec-xpu with ffmpeg n6'
@@ -244,7 +244,7 @@ jobs:
       uses: actions/checkout@v6
       with:
         repository: meta-pytorch/torchcodec
-        ref: v0.12.0
+        ref: v0.13.0
         path: torchcodec
     - name: 'Setup Conda'
       uses: conda-incubator/setup-miniconda@v4
@@ -277,7 +277,7 @@ jobs:
     - name: 'Install torchcodec'
       run: |
         find _wheels/ -name "*.whl"
-        pip install torch~=2.12.0 \
+        pip install \
           "$(ls ./_wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/torchcodec*.whl)[test]" \
           --extra-index-url https://download.pytorch.org/whl/xpu
     - name: 'Test gpu'

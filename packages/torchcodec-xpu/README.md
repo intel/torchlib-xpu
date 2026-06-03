@@ -18,6 +18,15 @@ decoder = torchcodec.decoders.VideoDecoder(
 
 All the Intel GPU hardware enabled for XPU PyTorch backend with hardware media decoding capabilities is supported.
 
+## Installation
+
+Pre-built release wheels are available at [PyPI](https://pypi.org/project/torchcodec-xpu). Installation requires PyTorch with enabled XPU support which can be fetched from https://download.pytorch.org/whl/xpu:
+
+```
+pip install torchcodec-xpu \
+  --extra-index-url https://download.pytorch.org/whl/xpu
+```
+
 ## Environment variables
 
 The following environment variables can be used to customize the behavior of Intel Plugin for TorchCodec:
@@ -28,8 +37,8 @@ The following environment variables can be used to customize the behavior of Int
 
 ## Known limitations
 
-* [Intel® Data Center GPU Max Series][PVC] (Ponte Vecchio, PVC) GPUs are not supported due to missing hardware media engines
-* SYCL color space conversion kernel is not supported on [Intel® Arc™ Pro A-Series Graphics][DG2] (Alchemist, DG2) and [Intel® Data Center GPU Flex Series][ATS-M] (Archtic Sound, ATS-M) GPUs as 64-bit floating point operations used in the kernel are not available on these GPUs
+* [Intel® Data Center GPU Max Series][PVC] (Ponte Vecchio, PVC) GPUs are not supported due to missing hardware media engines. Execution will fallback to CPU.
+* SYCL color space conversion kernel is not supported on [Intel® Arc™ Pro A-Series Graphics][DG2] (Alchemist, DG2) and [Intel® Data Center GPU Flex Series][ATS-M] (Archtic Sound, ATS-M) GPUs as 64-bit floating point operations used in the kernel are not available on these GPUs. Execution will fallback to less performant color space conversion on media engines via FFmpeg VAAPI.
 
 
 [TorchCodec]: https://github.com/meta-pytorch/torchcodec

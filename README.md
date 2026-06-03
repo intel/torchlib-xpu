@@ -28,6 +28,15 @@ decoder = torchcodec.decoders.VideoDecoder(
     "input.mp4", device="xpu:0")
 ```
 
+## Installation
+
+Pre-built release wheels are available at [PyPI](https://pypi.org/project/torchlib-xpu). Installation requires PyTorch with enabled XPU support which can be fetched from https://download.pytorch.org/whl/xpu:
+
+```
+pip install torchlib-xpu \
+  --extra-index-url https://download.pytorch.org/whl/xpu
+```
+
 ## Build from sources
 
 * Install [uv]

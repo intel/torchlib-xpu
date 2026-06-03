@@ -72,7 +72,7 @@ export LD_LIBRARY_PATH=$HOME/_install/lib:$LD_LIBRARY_PATH
 ```
 git clone https://github.com/intel/torchlib-xpu.git && cd torchlib-xpu
 
-uv venv && uv pip install torch -e . \
+uv venv && uv pip install -e . \
   --index https://download.pytorch.org/whl/xpu -vv
 ```
 

@@ -107,7 +107,13 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: 'Install prerequisites'
       run: |
-        rpm --import https://repositories.intel.com/gpu/intel-graphics.key
+        curl -vv \
+          --output intel-graphics.key \
+          --max-time 60 \
+          --retry 5 \
+          --retry-all-errors \
+          https://repositories.intel.com/gpu/intel-graphics.key
+        rpm --import intel-graphics.key
         dnf install -y libva-devel
     - name: 'Build the project'
       env:

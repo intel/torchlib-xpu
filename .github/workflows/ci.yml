@@ -20,6 +20,9 @@ on:
     branches:
       - main
       - 'release/**'
+  release:
+    types:
+      - published      
 
 permissions: read-all
 
@@ -314,11 +317,6 @@ jobs:
     - name: 'List wheels'
       run: |
         ls _wheels/*
-    - name: Publish package distributions to Test PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        repository-url: https://test.pypi.org/legacy/
-        packages-dir: _wheels/*
     - name: Publish package distributions to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:

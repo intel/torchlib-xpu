@@ -297,10 +297,12 @@ jobs:
         fi
         pytest -rsf -k "${known_failures}" test/
 
-  # TODO: change this placeholder to the actual job publishing artifacts to PyPI
   publish:
     needs: [ compose, test-torchcodec ]
+    if: github.event_name == 'release'
     runs-on: ubuntu-24.04
+    permissions:
+      id-token: write    
     env:
       WHEELS: torchlib-all-wheels
     steps:
@@ -311,4 +313,13 @@ jobs:
         path: _wheels
     - name: 'List wheels'
       run: |
-        ls _wheels
+        ls _wheels/*
+    - name: Publish package distributions to Test PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        repository-url: https://test.pypi.org/legacy/
+        packages-dir: _wheels/*
+    - name: Publish package distributions to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        packages-dir: _wheels/*

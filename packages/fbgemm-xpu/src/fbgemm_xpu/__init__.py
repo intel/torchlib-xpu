@@ -4,14 +4,17 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # SPDX-License-Identifier: BSD-3-Clause
 
-# Main package initialization for the fbgemm module
-# This imports the C extension and Python operator wrappers
-import torch
-from pathlib import Path
+# Import the compiled C extension (_C) which contains the registered operators.
+# If native dependencies (for example libtorch.so) are unavailable, keep import
+# working so metadata like __version__ remains accessible.
+try:
+    from . import _C as _C
+except ImportError:
+    _C = None
 
-# Import the compiled C extension (_C) which contains the registered operators
-# Import ops module which provides Python wrapper functions with autograd support
-from . import _C, ops
+from . import ops as ops
+
+__all__ = ["_C", "ops", "__version__"]
 
 try:
     from ._version import __version__

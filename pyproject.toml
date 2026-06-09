@@ -8,13 +8,12 @@ license = { file = "LICENSE" }
 authors = [
     { name = "Dmitry Rogozhkin", email = "dmitry.v.rogozhkin@intel.com" },
 ]
-dependencies = [ "torchcodec-xpu", "fbgemm-xpu" ]
+dependencies = [ "torchcodec-xpu"]
 
 [project.optional-dependencies]
 test = [
     "ruff",
-    "torchcodec-xpu[test]",
-    "fbgemm-xpu[test]",
+    "torchcodec-xpu[test]"
 ]
 
 [project.urls]
@@ -30,7 +29,6 @@ package = true  # set root project as a buildable package
 # 'workspace = true' indicates that project will be provided by the workspace
 # rather than fetched from PyPI
 torchcodec-xpu = { workspace = true }
-fbgemm-xpu = { workspace = true }
 
 [tool.uv.workspace]
 members = [ "packages/*" ]

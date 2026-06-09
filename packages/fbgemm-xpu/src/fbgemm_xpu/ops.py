@@ -7,9 +7,6 @@
 # Python wrapper functions for all custom operators under the fbgemm namespace
 # This module provides user-friendly interfaces to the C++ operators
 
-import torch
-from torch import Tensor
-
 __all__ = [
 	"dense_embedding_codegen_lookup_function",
 ]

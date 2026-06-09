@@ -26,9 +26,9 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
-    "pytest~=8.0",
-    "hypothesis~=6.0",
-    "expecttest~=0.3.0"
+    "pytest",
+    "hypothesis",
+    "expecttest"
 ]
 
 [project.urls]
@@ -36,7 +36,6 @@ GitHub = "https://github.com/intel/torchlib-xpu"
 
 [tool.scikit-build]
 cmake.version = ">=3.18"
-wheel.packages = ["src/fbgemm_xpu"]
 
 [tool.scikit-build.cmake.define]
 CMAKE_CXX_COMPILER = {env="CXX", default="icpx"}

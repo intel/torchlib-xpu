@@ -21,7 +21,7 @@ Submit a PR on Github to propose changes. Before doing so make sure that linter 
 Before running any checks, make sure to install the project with the test dependencies:
 
 ```
-uv venv && uv pip install torch -e ".[test]" \
+uv venv && uv pip install -e ".[test]" \
   --index https://download.pytorch.org/whl/xpu -vv
 ```
 
@@ -41,7 +41,7 @@ git clone https://github.com/meta-pytorch/torchcodec.git && cd torchcodec
 git am $TORCHCODEC_XPU_PATH/patches/0001-Add-XPU-support-to-tests.patch
 ```
 
-The patch file can be reviewed [here](packages/torchcodec-xpu/patches/0001-Add-XPU-support-to-tests.patch). The patch is known to apply clean on the following TorchCodec versions: `v0.12.0`.
+The patch file can be reviewed [here](packages/torchcodec-xpu/patches/0001-Add-XPU-support-to-tests.patch).
 
 TorchCodec tests require some additional packages. Install them as follows:
 

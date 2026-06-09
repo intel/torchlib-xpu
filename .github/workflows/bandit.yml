@@ -1,0 +1,25 @@
+name: Bandit Scanner
+on: 
+  pull_request:
+    branches:
+      - main
+      - 'release/*'
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan-code:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download project code
+        uses: actions/checkout@v6
+        with: 
+          path: torchlib-xpu
+      - name: Install Bandit
+        run: pip install bandit 
+      - name: Scan code
+        run: bandit -r torchlib-xpu

@@ -1,0 +1,21 @@
+name: Bandit Scanner
+on: 
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'The release version tag (e.g. release/0.1)'
+        required: true
+        type: string
+jobs:
+  scan-code:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download project code
+        uses: actions/checkout@v6
+        with: 
+          ref: '${{ inputs.release_tag }}'
+          path: torchlib-xpu
+      - name: Install Bandit
+        run: pip install bandit 
+      - name: Scan code
+        run: bandit -r torchlib-xpu

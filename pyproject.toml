@@ -8,7 +8,7 @@ license = { file = "LICENSE" }
 authors = [
     { name = "Dmitry Rogozhkin", email = "dmitry.v.rogozhkin@intel.com" },
 ]
-dependencies = [ "torchcodec-xpu"]
+dependencies = [ "torchcodec-xpu" ]
 
 [project.optional-dependencies]
 test = [

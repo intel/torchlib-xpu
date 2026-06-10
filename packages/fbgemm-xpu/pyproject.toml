@@ -20,6 +20,7 @@ authors = [
 ]
 dynamic = ["version"]
 dependencies = [
+    "fbgemm-gpu==1.6.0+cpu",
     "numpy~=2.0",
     "torch~=2.11.0",
 ]

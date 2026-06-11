@@ -25,18 +25,14 @@ source .venv/bin/activate
 
 ```bash
 uv pip install -e packages/fbgemm-xpu \
-  --index https://download.pytorch.org/whl/xpu \
-  --extra-index-url https://download.pytorch.org/whl/cpu \
-  --index-strategy unsafe-best-match
+  --index https://download.pytorch.org/whl/xpu
 ```
 
 * (Optional) Install test dependencies:
 
 ```bash
 uv pip install -e "packages/fbgemm-xpu[test]" \
-  --index https://download.pytorch.org/whl/xpu \
-  --extra-index-url https://download.pytorch.org/whl/cpu \
-  --index-strategy unsafe-best-match
+  --index https://download.pytorch.org/whl/xpu
 ```
 
 * Get installed package version:

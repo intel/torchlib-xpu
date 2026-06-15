@@ -302,7 +302,6 @@ jobs:
 
   publish:
     needs: [ compose, test-torchcodec ]
-    if: github.event_name == 'release'
     runs-on: ubuntu-24.04
     permissions:
       id-token: write    
@@ -324,6 +323,7 @@ jobs:
         cp "./_wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/torchlib_xpu-*.whl" _publish/
         ls -al _publish/
     - name: Publish package distributions to PyPI
+      if: github.event_name == 'release'
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
-        packages-dir: _wheels/*
+        packages-dir: _publish

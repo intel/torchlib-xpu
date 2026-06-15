@@ -44,6 +44,9 @@ else()
         message(WARNING "Failed to retrieve torch.xpu.get_arch_list()")
     endif()
 endif()
+if (NOT TORCH_XPU_ARCH_LIST)
+    message(FATAL_ERROR "Empty XPU architecture list"
+endif()
 message(STATUS "Building for XPU architectures: ${TORCH_XPU_ARCH_LIST}")
 
 set(SYCL_TARGETS -fsycl-targets=spir64_gen,spir64)

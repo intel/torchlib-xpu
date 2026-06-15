@@ -40,8 +40,8 @@ else()
         OUTPUT_STRIP_TRAILING_WHITESPACE
         RESULT_VARIABLE _arch_rc
     )
-    if(NOT _arch_rc EQUAL 0 OR TORCH_XPU_ARCH_LIST STREQUAL "")
-        set(TORCH_XPU_ARCH_LIST "pvc")
+    if(NOT _arch_rc EQUAL 0)
+        message(WARNING "Failed to retrieve torch.xpu.get_arch_list()")
     endif()
 endif()
 message(STATUS "Building for XPU architectures: ${TORCH_XPU_ARCH_LIST}")

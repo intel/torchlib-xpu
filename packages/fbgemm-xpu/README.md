@@ -1,8 +1,27 @@
-# fbgemm-xpu
+# Intel XPU Plugin for FBGEMM
 
-Intel XPU plugin package for FBGEMM operators.
+## Overview
 
-## Build from source
+[FBGEMM] is an optimized library for GEMMs and low-precision training. The Intel® XPU plugin for [FBGEMM] enables hardware acceleration for specific [FBGEMM] operators on Intel GPUs using SYCL kernels. Currently, acceleration is primarily targeted for DLRM v3 workloads.
+
+To use Intel® XPU plugin for [FBGEMM], load it in your Python script and ensure tensors are on XPU device:
+
+```python
+import torch
+import fbgemm_xpu
+
+# Usage examples will be added as operators are integrated into this project
+```
+
+## Supported hardware
+
+Currently, only [Intel® Data Center GPU Max Series][PVC] (Ponte Vecchio, PVC) GPUs are supported.
+
+## Installation
+
+Pre-built wheels will be available on [PyPI](https://pypi.org) in the future.
+
+For now, build from source:
 
 * Install [uv]
 
@@ -41,4 +60,15 @@ uv pip install -e "packages/fbgemm-xpu[test]" \
 python -c "import fbgemm_xpu; print(fbgemm_xpu.__version__)"
 ```
 
+## Environment variables
+
+Environment variables will be added as new FBGEMM operators are integrated into this project.
+
+## Known limitations
+
+Known limitations will be documented as new FBGEMM operators are integrated into this project.
+
+[FBGEMM]: https://github.com/pytorch/FBGEMM
 [uv]: https://github.com/astral-sh/uv
+[PVC]: https://www.intel.com/content/www/us/en/ark/products/series/232874/intel-data-center-gpu-max-series.html
+

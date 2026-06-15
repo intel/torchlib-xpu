@@ -3,7 +3,7 @@ requires = [
     "numpy~=2.0",
     "pybind11",
     "scikit-build-core>=0.10",
-    "torch~=2.11.0",
+    "torch~=2.12.0",
 ]
 build-backend = "scikit_build_core.build"
 
@@ -22,7 +22,7 @@ dynamic = ["version"]
 dependencies = [
     "fbgemm-gpu-cpu==1.7.0",
     "numpy~=2.0",
-    "torch~=2.11.0",
+    "torch~=2.12.0",
 ]
 
 [project.optional-dependencies]

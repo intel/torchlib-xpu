@@ -15,37 +15,25 @@ find_package(pybind11 REQUIRED)
 find_package(Torch REQUIRED)
 
 # --------------------------------------------------------------------------
-# SYCL backend detection: enabled only when CXX is the Intel oneAPI compiler
-# (icpx). Falls back to a host-only CPU build otherwise. Mirrors the previous
-# setup.py behavior driven by USE_SYCL / torch.xpu.is_available().
+# SYCL backend: required for fbgemm-xpu. All kernels are SYCL-based, so the
+# Intel oneAPI compiler (icpx) is mandatory.
 # --------------------------------------------------------------------------
-if(CMAKE_CXX_COMPILER MATCHES "icpx")
-    set(WITH_SYCL ON)
-    message(STATUS "Intel compiler detected: SYCL kernels enabled")
-else()
-    set(WITH_SYCL OFF)
-    message(STATUS "Non-Intel compiler in use: SYCL kernels disabled")
+if(NOT CMAKE_CXX_COMPILER MATCHES "icpx")
+    message(FATAL_ERROR "fbgemm-xpu requires Intel oneAPI compiler (icpx) with SYCL support")
 endif()
+message(STATUS "Intel compiler detected: SYCL kernels enabled")
 
 # --------------------------------------------------------------------------
-# XPU architecture list. Honors TORCH_XPU_ARCH_LIST env var, otherwise queries
-# torch.xpu.get_arch_list(), otherwise defaults to "pvc".
+# XPU architecture: currently only PVC (Ponte Vecchio) is supported.
 # --------------------------------------------------------------------------
 if(NOT "$ENV{TORCH_XPU_ARCH_LIST}" STREQUAL "")
-    set(TORCH_XPU_ARCH_LIST "$ENV{TORCH_XPU_ARCH_LIST}")
-else()
-    execute_process(
-        COMMAND ${Python3_EXECUTABLE} -c "import torch; print(','.join(torch.xpu.get_arch_list()))"
-        OUTPUT_VARIABLE TORCH_XPU_ARCH_LIST
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _arch_rc
-    )
-    if(NOT _arch_rc EQUAL 0)
-        message(WARNING "Failed to retrieve torch.xpu.get_arch_list()")
+    set(_requested_arch "$ENV{TORCH_XPU_ARCH_LIST}")
+    if(NOT _requested_arch MATCHES "pvc")
+        message(FATAL_ERROR "fbgemm-xpu currently only supports PVC architecture, requested: ${_requested_arch}")
     endif()
-endif()
-if (NOT TORCH_XPU_ARCH_LIST)
-    message(FATAL_ERROR "Empty XPU architecture list"
+    set(TORCH_XPU_ARCH_LIST ${_requested_arch})
+else()
+    set(TORCH_XPU_ARCH_LIST "pvc")
 endif()
 message(STATUS "Building for XPU architectures: ${TORCH_XPU_ARCH_LIST}")
 
@@ -53,11 +41,9 @@ set(SYCL_TARGETS -fsycl-targets=spir64_gen,spir64)
 set(SYCL_DEVICE_LIST -Xs "-device ${TORCH_XPU_ARCH_LIST} -options -cl-poison-unsupported-fp64-kernels")
 
 # --------------------------------------------------------------------------
-# Sources
-#
-# host_sources lists host C++ files that live alongside this CMakeLists.
-# SYCL kernels (.sycl) and companion .cpp files under sycl_kernels/ or
-# fbgemm_utils/ are picked up automatically by the GLOB_RECURSE below.
+# Sources: both host and SYCL kernel sources must be present for fbgemm-xpu
+# to function. SYCL kernels (.sycl) and companion .cpp files are collected
+# from sycl_kernels/ and fbgemm_utils/ directories.
 # --------------------------------------------------------------------------
 # Auto-include all host C++ sources in this directory.
 file(GLOB host_sources CONFIGURE_DEPENDS
@@ -86,17 +72,14 @@ foreach(_src IN LISTS sycl_sources)
     endif()
 endforeach()
 
-if(WITH_SYCL)
-    set(all_sources ${host_sources} ${sycl_sources_cxx})
-else()
-    set(all_sources ${host_sources})
-endif()
+set(all_sources ${host_sources} ${sycl_sources_cxx})
 
 # --------------------------------------------------------------------------
 # Extension module: fbgemm._C
 #
-# Skip target creation if no sources have been added yet — this lets the
-# scaffolding configure cleanly before any code is written.
+# SYCL kernels are required. Skip target creation if no sources have been
+# added yet, this lets the scaffolding configure cleanly before any code
+# is written.
 # --------------------------------------------------------------------------
 if(NOT all_sources)
     message(WARNING "fbgemm._C: no sources defined yet; skipping extension target.")
@@ -122,12 +105,9 @@ target_link_libraries(_C PRIVATE ${TORCH_LIBRARIES})
 
 target_compile_options(_C PRIVATE
     -fdiagnostics-color=always
-    -Wno-c++11-narrowing
 )
 
-if(WITH_SYCL)
-    target_compile_options(_C PRIVATE -fsycl ${SYCL_TARGETS})
-    target_link_options(_C PRIVATE -fsycl ${SYCL_TARGETS} ${SYCL_DEVICE_LIST})
-endif()
+target_compile_options(_C PRIVATE -fsycl ${SYCL_TARGETS})
+target_link_options(_C PRIVATE -fsycl ${SYCL_TARGETS} ${SYCL_DEVICE_LIST})
 
 install(TARGETS _C DESTINATION fbgemm_xpu)

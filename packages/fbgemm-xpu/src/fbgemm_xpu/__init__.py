@@ -1,7 +1,5 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates. All rights reserved.
 # Copyright (c) 2026 Intel Corporation. All Rights Reserved.
-#
-# Portions of this file are derived from FBGEMM
-# Copyright (c) Meta Platforms, Inc. and affiliates.
 # SPDX-License-Identifier: BSD-3-Clause
 
 # Import the compiled C extension (_C) which contains the registered operators.

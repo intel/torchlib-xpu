@@ -317,14 +317,12 @@ jobs:
     - name: 'List wheels'
       run: |
         tree _wheels/
-    - name: 'Check wheels'
+    - name: 'Prepare wheels'
       run: |
-        TORCHCODEC_WHEELS=`ls _wheels/*/torchcodec_xpu-*-manylinux_2_24_x86_64.whl | wc -l`
-        TORCHLIB_WHEELS=`ls _wheels/*/torchlib_xpu-*-py3-none-any.whl | wc -l`
-        ALL_FILES=`ls _wheels/*/* | wc -l`
-        if [[ $TORCHCODEC_WHEELS != 5 || $TORCHLIB_WHEELS != 1  || $ALL_FILES != 6 ]] ; then 
-          exit 1; 
-        fi
+        rm -rf _publish && mkdir _publish
+        cp "./_wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/torchcodec_xpu-*.whl" _publish/
+        cp "./_wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/torchlib_xpu-*.whl" _publish/
+        ls -al _publish/
     - name: Publish package distributions to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:

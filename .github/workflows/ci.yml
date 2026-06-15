@@ -319,8 +319,8 @@ jobs:
     - name: 'Prepare wheels'
       run: |
         rm -rf _publish && mkdir _publish
-        cp "./_wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/torchcodec_xpu-*.whl" _publish/
-        cp "./_wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/torchlib_xpu-*.whl" _publish/
+        cp ./_wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/torchcodec_xpu-*.whl _publish/
+        cp ./_wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/torchlib_xpu-*.whl _publish/
         ls -al _publish/
     - name: Publish package distributions to PyPI
       if: github.event_name == 'release'

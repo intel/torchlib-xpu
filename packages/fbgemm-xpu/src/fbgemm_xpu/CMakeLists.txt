@@ -27,11 +27,7 @@ message(STATUS "Intel compiler detected: SYCL kernels enabled")
 # XPU architecture: currently only PVC (Ponte Vecchio) is supported.
 # --------------------------------------------------------------------------
 if(NOT "$ENV{TORCH_XPU_ARCH_LIST}" STREQUAL "")
-    set(_requested_arch "$ENV{TORCH_XPU_ARCH_LIST}")
-    if(NOT _requested_arch STREQUAL "pvc")
-        message(FATAL_ERROR "fbgemm-xpu currently only supports PVC architecture, requested: ${_requested_arch}")
-    endif()
-    set(TORCH_XPU_ARCH_LIST ${_requested_arch})
+    set(TORCH_XPU_ARCH_LIST "$ENV{TORCH_XPU_ARCH_LIST}")
 else()
     set(TORCH_XPU_ARCH_LIST "pvc")
 endif()

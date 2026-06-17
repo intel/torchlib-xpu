@@ -38,32 +38,14 @@ set(SYCL_DEVICE_LIST -Xs "-device ${TORCH_XPU_ARCH_LIST} -options -cl-poison-uns
 
 # --------------------------------------------------------------------------
 # Sources: keep build inputs explicit so new files are reviewed when added.
-# Add new host .cpp files to host_sources and new SYCL .sycl files to
-# sycl_sources as operators are integrated.
+# Add new host and SYCL kernel .cpp files to host_sources as operators are
+# integrated.
 # --------------------------------------------------------------------------
 set(host_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/ops_registry.cpp
 )
 
-set(sycl_sources
-)
-
-# CMake does not recognize the .sycl extension as a C++ source. Mirror every
-# .sycl file into the build tree with a .cpp suffix so CMake schedules a
-# proper compile step for it; the icpx driver then handles SYCL via -fsycl.
-set(sycl_sources_cxx "")
-foreach(_src IN LISTS sycl_sources)
-    if(_src MATCHES "\\.sycl$")
-        file(RELATIVE_PATH _rel ${CMAKE_CURRENT_SOURCE_DIR} ${_src})
-        set(_mirrored ${CMAKE_CURRENT_BINARY_DIR}/${_rel}.cpp)
-        configure_file(${_src} ${_mirrored} COPYONLY)
-        list(APPEND sycl_sources_cxx ${_mirrored})
-    else()
-        list(APPEND sycl_sources_cxx ${_src})
-    endif()
-endforeach()
-
-set(all_sources ${host_sources} ${sycl_sources_cxx})
+set(all_sources ${host_sources})
 
 # --------------------------------------------------------------------------
 # Extension module: fbgemm._C
@@ -83,7 +65,7 @@ set_target_properties(_C PROPERTIES CXX_STANDARD 17)
 
 # The package root is needed because host sources include
 # "fbgemm_utils/torch_library.h". sycl_kernels and fbgemm_utils are added so
-# SYCL sources mirrored into the build tree can still resolve same-dir headers
+# future kernel .cpp files can resolve same-dir headers
 # ("feature_gates.h", "utils.h", ...).
 target_include_directories(_C PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}

@@ -24,7 +24,7 @@ endif()
 message(STATUS "Intel compiler detected: SYCL kernels enabled")
 
 # --------------------------------------------------------------------------
-# XPU architecture: currently only PVC (Ponte Vecchio) is supported.
+# XPU architecture: currently tested only on PVC (Ponte Vecchio).
 # --------------------------------------------------------------------------
 if(NOT "$ENV{TORCH_XPU_ARCH_LIST}" STREQUAL "")
     set(TORCH_XPU_ARCH_LIST "$ENV{TORCH_XPU_ARCH_LIST}")
@@ -37,20 +37,15 @@ set(SYCL_TARGETS -fsycl-targets=spir64_gen,spir64)
 set(SYCL_DEVICE_LIST -Xs "-device ${TORCH_XPU_ARCH_LIST} -options -cl-poison-unsupported-fp64-kernels")
 
 # --------------------------------------------------------------------------
-# Sources: both host and SYCL kernel sources must be present for fbgemm-xpu
-# to function. SYCL kernels (.sycl) and companion .cpp files are collected
-# from sycl_kernels/ and fbgemm_utils/ directories.
+# Sources: keep build inputs explicit so new files are reviewed when added.
+# Add new host .cpp files to host_sources and new SYCL .sycl files to
+# sycl_sources as operators are integrated.
 # --------------------------------------------------------------------------
-# Auto-include all host C++ sources in this directory.
-file(GLOB host_sources CONFIGURE_DEPENDS
-    *.cpp
+set(host_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/ops_registry.cpp
 )
 
-file(GLOB_RECURSE sycl_sources CONFIGURE_DEPENDS
-    sycl_kernels/*.sycl
-    sycl_kernels/*.cpp
-    fbgemm_utils/*.sycl
-    fbgemm_utils/*.cpp
+set(sycl_sources
 )
 
 # CMake does not recognize the .sycl extension as a C++ source. Mirror every

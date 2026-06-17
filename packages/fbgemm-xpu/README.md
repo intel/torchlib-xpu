@@ -15,7 +15,7 @@ import fbgemm_xpu
 
 ## Supported hardware
 
-Currently, only [Intel® Data Center GPU Max Series][PVC] (Ponte Vecchio, PVC) GPUs are supported.
+Currently, this package has been tested only on Intel® Data Center GPU Max Series (Ponte Vecchio, PVC) GPUs.
 
 ## Installation
 

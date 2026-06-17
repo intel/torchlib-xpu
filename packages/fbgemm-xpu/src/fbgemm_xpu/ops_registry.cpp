@@ -42,7 +42,7 @@ extern "C" {
  *
  * Operator schemas are declared here; device-specific implementations are
  * registered separately via TORCH_LIBRARY_IMPL(fbgemm, <KEY>, m) in the
- * respective .cpp / .sycl / .cu files.
+ * respective .cpp / .cu files.
  */
 TORCH_LIBRARY_FRAGMENT(fbgemm, m)
 {

@@ -54,4 +54,17 @@ TORCH_LIBRARY_FRAGMENT(fbgemm, m)
             "invert_permute(Tensor permute) -> Tensor"
         );
     }
+
+
+    if (!utils::torch::schemaExists("fbgemm::permute_1D_sparse_data")) {
+        m.def(
+            "permute_1D_sparse_data("
+            "    Tensor permute, "
+            "    Tensor lengths, "
+            "    Tensor values, "
+            "    Tensor? weights=None, "
+            "    SymInt? permuted_lengths_sum=None"
+            ") -> (Tensor, Tensor, Tensor?)"
+        );
+    }
 }

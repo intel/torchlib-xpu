@@ -5,12 +5,13 @@
 # Python wrapper functions for all custom operators under the fbgemm namespace
 # This module provides user-friendly interfaces to the C++ operators
 
+import torch
+from torch import Tensor
+
 __all__ = [
-	"dense_embedding_codegen_lookup_function",
+    "invert_permute",
 ]
 
-def dense_embedding_codegen_lookup_function(*args, **kwargs):
-	"""Temporary stub for the planned dense embedding API."""
-	raise NotImplementedError(
-		"dense_embedding_codegen_lookup_function is not implemented yet in src/fbgemm_xpu/ops.py"
-	)
+def invert_permute(permute: Tensor) -> Tensor:
+    """Computes the inverse of a permutation tensor."""
+    return torch.ops.fbgemm.invert_permute.default(permute)

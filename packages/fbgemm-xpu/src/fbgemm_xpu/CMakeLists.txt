@@ -45,6 +45,7 @@ set(host_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/ops_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sycl_kernels/invert_permute_kernel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sycl_kernels/permute_1d_sparse_data.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/asynchronous_complete_cumsum.cpp
 )
 
 set(all_sources ${host_sources})

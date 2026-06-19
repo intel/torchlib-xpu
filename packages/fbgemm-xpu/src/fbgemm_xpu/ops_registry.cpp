@@ -67,4 +67,10 @@ TORCH_LIBRARY_FRAGMENT(fbgemm, m)
             ") -> (Tensor, Tensor, Tensor?)"
         );
     }
+
+    if (!utils::torch::schemaExists("fbgemm::asynchronous_complete_cumsum")) {
+        m.def(
+            "asynchronous_complete_cumsum(Tensor t_in) -> Tensor"
+        );
+    }
 }

@@ -50,7 +50,7 @@ jobs:
       PREFIX: ${{ github.workspace }}/_install/ffmpeg-${{ matrix.ffmpeg-version }}
     steps:
     - name: 'Checkout'
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         repository: FFmpeg/FFmpeg
         ref: ${{ matrix.ffmpeg-version }}
@@ -94,7 +94,7 @@ jobs:
       image: 'pytorch/manylinux2_28-builder:xpu-v2.12.0-rc1'
     steps:
     - name: 'Checkout'
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
     - name: 'Download FFmpeg'
       uses: actions/download-artifact@v8
       with:
@@ -241,11 +241,11 @@ jobs:
         name: ${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}
         path: _wheels/
     - name: 'Checkout'
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         path: torchlib-xpu
     - name: 'Checkout'
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         repository: meta-pytorch/torchcodec
         ref: v0.14.0

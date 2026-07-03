@@ -1,0 +1,222 @@
+name: ci-fbgemm-xpu
+
+# This workflow builds manylinux fbgemm-xpu wheels. Kernels are SYCL-based 
+# and compiled with the Intel oneAPI compiler (icpx), targeting Intel XPU 
+# architectures.
+#
+# We use the pytorch manylinux builder image
+# (pytorch/manylinux2_28-builder:xpu-v2.12.0-rc1) since it already ships
+# the Intel driver stack and oneAPI toolchain. Using the plain PyPa
+# manylinux container would require setting all of that up ourselves.
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+  release:
+    types:
+      - published
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PR_OR_SHA: ${{ github.event.pull_request.number || github.sha }}
+  UNIQUE_ID: ${{ github.run_id }}
+
+jobs:
+  # ============================================================================
+  # FBGEMM-XPU JOBS
+  # The following jobs build, test, and publish fbgemm-xpu package
+  # ============================================================================
+  build:
+    strategy:
+      matrix:
+        python-version: [ '3.10', '3.11', '3.12', '3.13', '3.14' ]
+    runs-on: ubuntu-24.04
+    env:
+      WHEELS: fbgemm-xpu-${{ matrix.python-version }}-wheels
+    container:
+      image: 'pytorch/manylinux2_28-builder:xpu-v2.12.0-rc1'
+    steps:
+    - name: 'Checkout'
+      uses: actions/checkout@v7
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: 'Build fbgemm-xpu'
+      run: |
+        source /opt/intel/oneapi/setvars.sh
+        uv build --package fbgemm-xpu --index https://download.pytorch.org/whl/xpu -vv
+    - name: 'Repair wheels with auditwheel'
+      run: |
+        uvx auditwheel repair dist/*.whl \
+          --wheel-dir _wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }} \
+          --exclude "*" --allow-pure-python-wheel
+    - name: 'Test installing fbgemm-xpu'
+      run: |
+        uv venv
+        uv pip install \
+          _wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/*.whl \
+          --index https://download.pytorch.org/whl/xpu -vv
+    - name: 'Test importing fbgemm-xpu'
+      run: |
+        uv run --no-project python -c "import fbgemm_xpu; print(fbgemm_xpu.__version__)"
+    - name: 'Upload wheels'
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}
+        path: _wheels
+        compression-level: 0
+
+  compose:
+    needs: build
+    runs-on: ubuntu-24.04
+    env:
+      WHEELS: fbgemm-xpu-all-wheels
+    steps:
+    - name: 'Download wheels'
+      uses: actions/download-artifact@v8
+      with:
+        pattern: 'fbgemm-xpu-*-wheels-*'
+        path: _all_wheels
+        # The goal is to get the following layout:
+        # _all_wheels/
+        #   fbgemm-xpu-3.14-wheels-xxx-yyy
+        #   fbgemm-xpu-3.13-wheels-xxx-yyy
+        merge-multiple: true
+    - name: 'Install prerequisites'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y tree
+    - name: 'List downloads'
+      run: |
+        tree _all_wheels/
+    - name: 'Form uploads'
+      run: |
+        TO=${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}
+        mkdir _wheels && mkdir _wheels/$TO
+        find _all_wheels/ -name "*-cp[0-9]*-cp[0-9]*-*.whl" \
+          -exec cp {} _wheels/$TO \;
+        # Take "*-none-any.whl" from the oldest python we've built for
+        find "$(ls -d _all_wheels/*/ | sort | head -n 1)" -name "*-none-any.whl" \
+          -exec cp {} _wheels/$TO \;
+    - name: 'List uploads'
+      run: |
+        tree _wheels/
+    - name: 'Upload wheels'
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}
+        path: _wheels/
+        compression-level: 0
+
+  test-fbgemm:
+    needs: build
+    strategy:
+      matrix:
+        # Testing in minimum and maximum supported versions of python.
+        python-version: [ '3.10', '3.14' ]
+        runner: [ 'bmg', 'dg2' ]
+    runs-on: ${{matrix.runner}}
+    container:
+      image: 'ubuntu:24.04'
+      options: --device /dev/dri:/dev/dri -v /dev/dri/by-path:/dev/dri/by-path
+    env:
+      WHEELS: fbgemm-xpu-${{ matrix.python-version }}-wheels
+    defaults:
+      run:
+        shell: bash -l {0}  # for conda environment activation
+    steps:
+    - name: 'Install prerequisites'
+      run: |
+        apt-get update
+        apt-get install -y \
+          ca-certificates \
+          curl \
+          git \
+          gpg \
+          software-properties-common \
+          wget
+    - name: 'Download wheels'
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}
+        path: _wheels/
+    - name: 'Setup Conda'
+      uses: conda-incubator/setup-miniconda@v4
+      with:
+        # conda configuration
+        auto-update-conda: false
+        channels: conda-forge
+        channel-priority: strict
+        conda-remove-defaults: true
+        miniforge-version: latest
+        use-mamba: true
+        # environment configuration
+        activate-environment: test-env
+        python-version: ${{ matrix.python-version }}
+    - name: 'Install Intel drivers'
+      run: |
+        add-apt-repository -y ppa:kobuk-team/intel-graphics
+        apt-get install -y \
+          libze1 \
+          libze-intel-gpu1 \
+          intel-ocloc
+    - name: 'Install pip'
+      run: |
+        conda install pip
+    - name: 'Install fbgemm-xpu'
+      run: |
+        pwd
+        ls -l 
+        ls -l ./_wheels/
+        pwd
+        find ./_wheels/ -name "*.whl"
+        pip install \
+          "$(ls ./_wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/fbgemm_xpu*.whl)[test]" \
+          --extra-index-url https://download.pytorch.org/whl/xpu
+    - name: 'Test gpu'
+      run: |
+        python -c "import torch; print(torch.xpu.is_available())" 
+    - name: 'Test fbgemm-xpu'
+      working-directory: packages/fbgemm-xpu
+      run: |
+        pytest -rsf test/
+
+  publish:
+    needs: [ compose, test-fbgemm ]
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+    env:
+      WHEELS: fbgemm-xpu-all-wheels
+    steps:
+    - name: 'Download wheels'
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}
+        path: _wheels
+    - name: 'List wheels'
+      run: |
+        tree _wheels/
+    - name: 'Prepare wheels'
+      run: |
+        rm -rf _publish && mkdir _publish
+        cp ./_wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/fbgemm_xpu-*.whl _publish/
+        ls -al _publish/
+    - name: Publish package distributions to PyPI
+      if: github.event_name == 'release'
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        packages-dir: _publish
+

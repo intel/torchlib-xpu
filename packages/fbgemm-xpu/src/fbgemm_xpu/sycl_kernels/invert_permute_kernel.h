@@ -14,10 +14,8 @@
 //   File: fbgemm_gpu/src/sparse_ops/sparse_invert_permute.cu
 //
 // KERNEL MAPPING:
-//   InvertPermuteKernelInt32 (SYCL)
-//     → invert_permute_kernel<int32_t> (CUDA)
-//   InvertPermuteKernelInt64 (SYCL)
-//     → invert_permute_kernel<int64_t> (CUDA)
+//   InvertPermuteKernel<index_t> (SYCL)
+//     → invert_permute_kernel<index_t> (CUDA)
 //
 // HOST FUNCTION MAPPING:
 //   invert_permute_forward_xpu (SYCL)
@@ -50,71 +48,42 @@ namespace fbgemm_xpu {
 // ============================================================================
 
 ////////////////////////////////////////////////////////////////////////////////
-// InvertPermuteKernelInt32 - Device Kernel
+// InvertPermuteKernel - Device Kernel
 ////////////////////////////////////////////////////////////////////////////////
 //
 // CUDA SOURCE MAPPING:
-//   CUDA Kernel: invert_permute_kernel<int32_t>
+//   CUDA Kernel: invert_permute_kernel<index_t>
 //   CUDA File: fbgemm_gpu/src/sparse_ops/sparse_invert_permute.cu
 //
 // DESCRIPTION:
-//   Main kernel for inverting a permutation tensor (int32 version).
-//   Implements the core logic: inversed_permute[permute[i]] = i
-//   using a grid-stride loop pattern for scalability.
+//   Templated kernel for inverting a permutation tensor. Works for any integer
+//   index type (int32_t or int64_t), mirroring the reference CUDA kernel
+//   invert_permute_kernel<index_t>. Implements the core logic:
+//   inversed_permute[permute[i]] = i using a grid-stride loop pattern for
+//   scalability.
 //
 //   The grid-stride loop allows each work-item to process multiple elements,
 //   ensuring correct behavior regardless of the relationship between N
 //   (number of elements) and the number of work-items launched.
 //
 ////////////////////////////////////////////////////////////////////////////////
-class InvertPermuteKernelInt32 {
+template <typename index_t>
+class InvertPermuteKernel {
 public:
-    InvertPermuteKernelInt32(
+    InvertPermuteKernel(
         int64_t numel,
-        const int32_t* permute,
-        int32_t* inversed_permute)
+        const index_t* permute,
+        index_t* inversed_permute)
         : numel_(numel),
           permute_(permute),
           inversed_permute_(inversed_permute) {}
-    
+
     void operator()(const sycl::nd_item<1>& item) const;
 
 private:
     int64_t numel_;
-    const int32_t* permute_;
-    int32_t* inversed_permute_;
-};
-
-////////////////////////////////////////////////////////////////////////////////
-// InvertPermuteKernelInt64 - Device Kernel
-////////////////////////////////////////////////////////////////////////////////
-//
-// CUDA SOURCE MAPPING:
-//   CUDA Kernel: invert_permute_kernel<int64_t>
-//   CUDA File: fbgemm_gpu/src/sparse_ops/sparse_invert_permute.cu
-//
-// DESCRIPTION:
-//   Main kernel for inverting a permutation tensor (int64 version).
-//   Same logic as Int32 version but for 64-bit integers.
-//   Uses grid-stride loop pattern for scalability.
-//
-////////////////////////////////////////////////////////////////////////////////
-class InvertPermuteKernelInt64 {
-public:
-    InvertPermuteKernelInt64(
-        int64_t numel,
-        const int64_t* permute,
-        int64_t* inversed_permute)
-        : numel_(numel),
-          permute_(permute),
-          inversed_permute_(inversed_permute) {}
-    
-    void operator()(const sycl::nd_item<1>& item) const;
-
-private:
-    int64_t numel_;
-    const int64_t* permute_;
-    int64_t* inversed_permute_;
+    const index_t* permute_;
+    index_t* inversed_permute_;
 };
 
 // ============================================================================

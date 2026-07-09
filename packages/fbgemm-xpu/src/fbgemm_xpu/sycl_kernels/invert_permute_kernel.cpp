@@ -12,25 +12,15 @@ namespace fbgemm_xpu {
 // SYCL Kernel Functor Implementations
 // ============================================================================
 
-void InvertPermuteKernelInt32::operator()(const sycl::nd_item<1>& item) const {
+template <typename index_t>
+void InvertPermuteKernel<index_t>::operator()(const sycl::nd_item<1>& item) const {
     const int64_t global_id = item.get_global_id(0);
     const int64_t global_range = item.get_global_range(0);
-    
-    // Grid-stride loop pattern for scalability
-    for (int64_t i = global_id; i < numel_; i += global_range) {
-        const int32_t target_idx = permute_[i];
-        inversed_permute_[target_idx] = static_cast<int32_t>(i);
-    }
-}
 
-void InvertPermuteKernelInt64::operator()(const sycl::nd_item<1>& item) const {
-    const int64_t global_id = item.get_global_id(0);
-    const int64_t global_range = item.get_global_range(0);
-    
     // Grid-stride loop pattern for scalability
     for (int64_t i = global_id; i < numel_; i += global_range) {
-        const int64_t target_idx = permute_[i];
-        inversed_permute_[target_idx] = i;
+        const index_t target_idx = permute_[i];
+        inversed_permute_[target_idx] = static_cast<index_t>(i);
     }
 }
 
@@ -72,37 +62,23 @@ at::Tensor invert_permute_forward_xpu(const at::Tensor& permute) {
     const size_t global_size = blocks * threads;
     const size_t local_size = threads;
     
-    // Launch kernel based on dtype
-    if (permute.dtype() == at::kInt) {
-        // int32 path
-        const int32_t* permute_ptr = permute_contig.data_ptr<int32_t>();
-        int32_t* inversed_ptr = inversed_permute.data_ptr<int32_t>();
-        
-        queue.submit([&](sycl::handler& cgh) {
-            cgh.parallel_for<InvertPermuteKernelInt32>(
-                sycl::nd_range<1>(
-                    sycl::range<1>(global_size),  // Global range
-                    sycl::range<1>(local_size)    // Local range (work-group size)
-                ),
-                InvertPermuteKernelInt32(N, permute_ptr, inversed_ptr)
-            );
+    // Dispatch over the index type (int32_t or int64_t), mirroring the
+    // reference CUDA kernel invert_permute_kernel<index_t>.
+    AT_DISPATCH_INDEX_TYPES(
+        permute_contig.scalar_type(), "invert_permute_kernel", [&] {
+            const index_t* permute_ptr = permute_contig.data_ptr<index_t>();
+            index_t* inversed_ptr = inversed_permute.data_ptr<index_t>();
+
+            queue.submit([&](sycl::handler& cgh) {
+                cgh.parallel_for<InvertPermuteKernel<index_t>>(
+                    sycl::nd_range<1>(
+                        sycl::range<1>(global_size),  // Global range
+                        sycl::range<1>(local_size)    // Local range
+                    ),
+                    InvertPermuteKernel<index_t>(N, permute_ptr, inversed_ptr)
+                );
+            });
         });
-        
-    } else {
-        // int64 path
-        const int64_t* permute_ptr = permute_contig.data_ptr<int64_t>();
-        int64_t* inversed_ptr = inversed_permute.data_ptr<int64_t>();
-        
-        queue.submit([&](sycl::handler& cgh) {
-            cgh.parallel_for<InvertPermuteKernelInt64>(
-                sycl::nd_range<1>(
-                    sycl::range<1>(global_size),
-                    sycl::range<1>(local_size)
-                ),
-                InvertPermuteKernelInt64(N, permute_ptr, inversed_ptr)
-            );
-        });
-    }
     
     // Note: We don't call queue.wait() here for asynchronous execution.
     // PyTorch's stream synchronization will handle proper ordering.

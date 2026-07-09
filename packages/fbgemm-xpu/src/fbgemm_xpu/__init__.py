@@ -2,6 +2,10 @@
 # Copyright (c) 2026 Intel Corporation. All Rights Reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 
+# Import fbgemm_gpu first so that all "fbgemm" operator schemas are registered
+# before _C loads the XPU implementations via TORCH_LIBRARY_IMPL.
+import fbgemm_gpu  # noqa: F401, E402
+
 # Import the compiled C extension (_C) which contains the registered operators.
 # If native dependencies (for example libtorch.so) are unavailable, keep import
 # working so metadata like __version__ remains accessible.
@@ -10,9 +14,7 @@ try:
 except ImportError:
     _C = None
 
-from . import ops as ops
-
-__all__ = ["_C", "ops", "__version__"]
+__all__ = ["_C", "__version__"]
 
 try:
     from ._version import __version__

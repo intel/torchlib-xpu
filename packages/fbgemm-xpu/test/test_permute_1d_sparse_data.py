@@ -11,13 +11,14 @@ on XPU (Intel GPU) devices.
 Tests are designed to match TorchRec/DLRM sparse embedding scenarios.
 """
 
-import torch
 import unittest
-import fbgemm_gpu  # Provides fallback implementations
-import fbgemm_xpu
+from typing import Optional, Tuple
+
+import fbgemm_gpu as fbgemm_gpu  # Provides fallback implementations
+import fbgemm_xpu as fbgemm_xpu
+import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.optests import opcheck
-from typing import Optional, Tuple
 
 # Reproducible seed for all random tests
 SEED = 42

@@ -40,10 +40,7 @@
 //     → permute_1D_lengths_kernel (CUDA)
 //
 //   Permute1DDataKernel::operator()
-//     → permute_1D_data_kernel<false, ...> (CUDA)
-//
-//   Permute1DDataWithWeightsKernel::operator()
-//     → permute_1D_data_kernel<true, ...> (CUDA)
+//     → permute_1D_data_kernel<has_weight, ...> (CUDA)
 //
 // HOST FUNCTION:
 //   permute_1D_sparse_data_xpu
@@ -80,9 +77,17 @@ void Permute1DLengthsKernel<index_t>::operator()(
 
 /**
  * @brief Permute1DDataKernel operator implementation
+ *
+ * Copies indices for each segment; when `has_weight` is true it also copies
+ * the associated weights. The weight-copy branch is a compile-time `if
+ * constexpr`, so the no-weights instantiation pays no runtime cost.
  */
-template <typename offsets_t, typename indices_t>
-void Permute1DDataKernel<offsets_t, indices_t>::operator()(
+template <
+    bool has_weight,
+    typename offsets_t,
+    typename indices_t,
+    typename weights_t>
+void Permute1DDataKernel<has_weight, offsets_t, indices_t, weights_t>::operator()(
     const sycl::nd_item<2>& item) const {
     // Get segment ID and thread ID within segment
     const int32_t segment_base = item.get_group(0) * item.get_local_range(1);
@@ -106,36 +111,9 @@ void Permute1DDataKernel<offsets_t, indices_t>::operator()(
     // Copy data using strided access pattern
     for (int32_t i = tid; i < segment_length; i += threads_per_segment) {
         permuted_indices_[output_start + i] = indices_[input_start + i];
-    }
-}
-
-/**
- * @brief Permute1DDataWithWeightsKernel operator implementation
- */
-template <typename offsets_t, typename indices_t, typename weights_t>
-void Permute1DDataWithWeightsKernel<offsets_t, indices_t, weights_t>::operator()(
-    const sycl::nd_item<2>& item) const {
-    const int32_t segment_base = item.get_group(0) * item.get_local_range(1);
-    const int32_t segment_local = item.get_local_id(1);
-    const int32_t segment_id = segment_base + segment_local;
-    const int32_t tid = item.get_local_id(0);
-    const int32_t threads_per_segment = item.get_local_range(0);
-
-    if (segment_id >= permuted_lengths_size_) {
-        return;
-    }
-
-    const offsets_t output_start = output_offsets_[segment_id];
-    const offsets_t output_end = (segment_id == permuted_lengths_size_ - 1)
-        ? static_cast<offsets_t>(permuted_indices_size_)
-        : output_offsets_[segment_id + 1];
-    const int32_t segment_length = static_cast<int32_t>(output_end - output_start);
-    const offsets_t input_start = input_offsets_[permute_[segment_id]];
-
-    // Copy both indices and weights
-    for (int32_t i = tid; i < segment_length; i += threads_per_segment) {
-        permuted_indices_[output_start + i] = indices_[input_start + i];
-        permuted_weights_[output_start + i] = weights_[input_start + i];
+        if constexpr (has_weight) {
+            permuted_weights_[output_start + i] = weights_[input_start + i];
+        }
     }
 }
 
@@ -366,10 +344,12 @@ permute_1D_sparse_data_xpu(
                         AT_DISPATCH_FLOATING_TYPES_AND_HALF(
                             weights->scalar_type(), "permute_1D_data_xpu_weights", [&] {
                                 using weights_t = scalar_t;
+                                using KernelT = Permute1DDataKernel<
+                                    /*has_weight=*/true, offsets_t, indices_t, weights_t>;
                                 queue.submit([&](sycl::handler& cgh) {
-                                    cgh.parallel_for<Permute1DDataWithWeightsKernel<offsets_t, indices_t, weights_t>>(
+                                    cgh.parallel_for<KernelT>(
                                         sycl::nd_range<2>(global_range, local_range),
-                                        Permute1DDataWithWeightsKernel<offsets_t, indices_t, weights_t>(
+                                        KernelT(
                                             permuted_indices_size,
                                             permuted_lengths_size,
                                             indices_contig.data_ptr<indices_t>(),
@@ -389,7 +369,8 @@ permute_1D_sparse_data_xpu(
             }
         );
     } else {
-        // Without weights
+        // Without weights -- weights_t is a placeholder (float) since
+        // has_weight=false disables the weight-copy branch at compile time.
         AT_DISPATCH_INDEX_TYPES(
             input_offsets.scalar_type(), "permute_1D_data_xpu_offsets", [&] {
                 using offsets_t = index_t;
@@ -397,17 +378,21 @@ permute_1D_sparse_data_xpu(
                     at::kHalf, at::kBFloat16,
                     indices.scalar_type(), "permute_1D_data_xpu_indices", [&] {
                         using indices_t = scalar_t;
+                        using KernelT = Permute1DDataKernel<
+                            /*has_weight=*/false, offsets_t, indices_t, float>;
                         queue.submit([&](sycl::handler& cgh) {
-                            cgh.parallel_for<Permute1DDataKernel<offsets_t, indices_t>>(
+                            cgh.parallel_for<KernelT>(
                                 sycl::nd_range<2>(global_range, local_range),
-                                Permute1DDataKernel<offsets_t, indices_t>(
+                                KernelT(
                                     permuted_indices_size,
                                     permuted_lengths_size,
                                     indices_contig.data_ptr<indices_t>(),
+                                    /*weights=*/nullptr,
                                     permute_contig.data_ptr<int32_t>(),
                                     input_offsets.data_ptr<offsets_t>(),
                                     output_offsets.data_ptr<offsets_t>(),
-                                    permuted_indices.data_ptr<indices_t>()
+                                    permuted_indices.data_ptr<indices_t>(),
+                                    /*permuted_weights=*/nullptr
                                 )
                             );
                         });

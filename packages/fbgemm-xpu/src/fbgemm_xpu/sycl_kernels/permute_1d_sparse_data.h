@@ -17,11 +17,8 @@
 //   Permute1DLengthsKernel (SYCL)
 //     → permute_1D_lengths_kernel (CUDA)
 //
-//   Permute1DDataKernel (SYCL)
-//     → permute_1D_data_kernel<false, ...> (CUDA - no weights variant)
-//
-//   Permute1DDataWithWeightsKernel (SYCL)
-//     → permute_1D_data_kernel<true, ...> (CUDA - with weights variant)
+//   Permute1DDataKernel<has_weight, ...> (SYCL)
+//     → permute_1D_data_kernel<has_weight, ...> (CUDA)
 //
 // HOST FUNCTION MAPPING:
 //   permute_1D_sparse_data_xpu (SYCL)
@@ -89,7 +86,7 @@ private:
 };
 
 // ============================================================================
-// SYCL Kernel Functors - Data Permutation (without weights)
+// SYCL Kernel Functors - Data Permutation
 // ============================================================================
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -97,80 +94,34 @@ private:
 ////////////////////////////////////////////////////////////////////////////////
 //
 // CUDA SOURCE MAPPING:
-//   CUDA Kernel: permute_1D_data_kernel<false, offsets_t, indices_t, nullptr_t>
+//   CUDA Kernel: permute_1D_data_kernel<has_weight, offsets_t, indices_t, weights_t>
 //   CUDA File: fbgemm_gpu/src/sparse_ops/sparse_permute_1d.cu
 //
 // DESCRIPTION:
-//   Permutes sparse indices according to segment permutation. Uses 2D parallel
-//   decomposition where each row of work-items processes one segment.
+//   Permutes sparse indices (and optionally weights) according to segment
+//   permutation. Uses 2D parallel decomposition where each row of work-items
+//   processes one segment. Mirrors the CUDA reference by parameterizing the
+//   weight-copy path on the non-type template parameter `has_weight`.
 //
 ////////////////////////////////////////////////////////////////////////////////
 
 /**
- * @brief SYCL kernel functor for permuting data without weights
+ * @brief SYCL kernel functor for permuting data (with or without weights)
  *
  * 2D parallel decomposition:
  * - Dimension 0 (y): segments (one row of work-items per segment)
  * - Dimension 1 (x): threads cooperating on one segment
+ *
+ * When `has_weight` is false, `weights` and `permuted_weights` may be nullptr.
  */
-template <typename offsets_t, typename indices_t>
+template <
+    bool has_weight,
+    typename offsets_t,
+    typename indices_t,
+    typename weights_t>
 class Permute1DDataKernel {
 public:
     Permute1DDataKernel(
-        int64_t permuted_indices_size,
-        int64_t permuted_lengths_size,
-        const indices_t* indices,
-        const int32_t* permute,
-        const offsets_t* input_offsets,
-        const offsets_t* output_offsets,
-        indices_t* permuted_indices)
-        : permuted_indices_size_(permuted_indices_size),
-          permuted_lengths_size_(permuted_lengths_size),
-          indices_(indices),
-          permute_(permute),
-          input_offsets_(input_offsets),
-          output_offsets_(output_offsets),
-          permuted_indices_(permuted_indices) {}
-
-    void operator()(const sycl::nd_item<2>& item) const;
-
-private:
-    int64_t permuted_indices_size_;
-    int64_t permuted_lengths_size_;
-    const indices_t* indices_;
-    const int32_t* permute_;
-    const offsets_t* input_offsets_;
-    const offsets_t* output_offsets_;
-    indices_t* permuted_indices_;
-};
-
-// ============================================================================
-// SYCL Kernel Functors - Data Permutation (with weights)
-// ============================================================================
-
-////////////////////////////////////////////////////////////////////////////////
-// Permute1DDataWithWeightsKernel - Device Kernel
-////////////////////////////////////////////////////////////////////////////////
-//
-// CUDA SOURCE MAPPING:
-//   CUDA Kernel: permute_1D_data_kernel<true, offsets_t, indices_t, weights_t>
-//   CUDA File: fbgemm_gpu/src/sparse_ops/sparse_permute_1d.cu
-//
-// DESCRIPTION:
-//   Same as Permute1DDataKernel but also copies weight values alongside
-//   indices.
-//
-////////////////////////////////////////////////////////////////////////////////
-
-/**
- * @brief SYCL kernel functor for permuting data with weights
- *
- * Same structure as Permute1DDataKernel but also copies weight values.
- */
-template <typename offsets_t, typename indices_t, typename weights_t>
-class Permute1DDataWithWeightsKernel {
-public:
-    Permute1DDataWithWeightsKernel(
         int64_t permuted_indices_size,
         int64_t permuted_lengths_size,
         const indices_t* indices,

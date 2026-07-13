@@ -1,12 +1,16 @@
 From 1ff5ad5b0c0a780081a8d6f90748c9c9df08e26d Mon Sep 17 00:00:00 2001
 From: Alberto Gallegos <alberto.gallegos.muro@intel.com>
 Date: Thu, 9 Jul 2026 18:28:28 +0000
-Subject: [PATCH] Add XPU support to misc ops tests
+Subject: [PATCH] Add XPU support to FBGEMM sparse ops tests
+
+Add XPU device support to misc_ops_test.py and permute_sparse_features_test.py.
+Includes support for permute_1D_sparse_data and permute_2D_sparse_data operators.
 
 Signed-off-by: Alberto Gallegos <alberto.gallegos.muro@intel.com>
 ---
- fbgemm_gpu/test/sparse/misc_ops_test.py | 18 +++++++++++++++---
- 1 file changed, 15 insertions(+), 3 deletions(-)
+ fbgemm_gpu/test/sparse/misc_ops_test.py            |  18 ++++++--
+ .../test/sparse/permute_sparse_features_test.py    |  48 ++++++++++----------
+ 2 files changed, 39 insertions(+), 27 deletions(-)
 
 diff --git a/fbgemm_gpu/test/sparse/misc_ops_test.py b/fbgemm_gpu/test/sparse/misc_ops_test.py
 index edb0d3615..f825ce27c 100644
@@ -87,6 +91,100 @@ index edb0d3615..f825ce27c 100644
      def test_lengths_range(self) -> None:
          # When 'output_shape' is None, the function will return a tensor with dynamic shape.
          with self.assertRaisesRegex(
+diff --git a/fbgemm_gpu/test/sparse/permute_sparse_features_test.py b/fbgemm_gpu/test/sparse/permute_sparse_features_test.py
+index 2b8302739..296f7e122 100644
+--- a/fbgemm_gpu/test/sparse/permute_sparse_features_test.py
++++ b/fbgemm_gpu/test/sparse/permute_sparse_features_test.py
+@@ -19,6 +19,11 @@ from hypothesis import given, settings
+ 
+ from .common import extend_test_class, open_source, permute_indices_ref_
+ 
++# Registers the XPU (Intel GPU) FBGEMM operator implementations.
++import fbgemm_xpu  # noqa: F401, E402
++
++xpu_available: bool = torch.xpu.is_available()
++
+ if open_source:
+     # pyre-ignore[21]
+     from test_utils import gpu_available, gpu_unavailable, on_oss_clang, running_in_oss
+@@ -203,8 +208,7 @@ class PermuteSparseFeaturesTest(unittest.TestCase):
+ 
+ 
+ class Permute1DSparseFeaturesTest(unittest.TestCase):
+-    @unittest.skipIf(*running_in_oss)
+-    @unittest.skipIf(*gpu_unavailable)
++    @unittest.skipIf(not xpu_available, "XPU not available")
+     @given(
+         T=st.integers(min_value=1, max_value=20),
+         L=st.integers(min_value=2, max_value=20),
+@@ -232,7 +236,7 @@ class Permute1DSparseFeaturesTest(unittest.TestCase):
+             low=1,
+             high=L,
+             size=(T,),  # 1D tensor with T elements
+-            device=torch.accelerator.current_accelerator(),
++            device="xpu",
+         ).type(index_dtype)
+ 
+         # Create optional 2D weights tensor with dimensions [total_indices, weight_columns]
+@@ -240,7 +244,7 @@ class Permute1DSparseFeaturesTest(unittest.TestCase):
+             torch.rand(
+                 int(lengths.sum().item()),
+                 weight_columns,
+-                device=torch.accelerator.current_accelerator(),
++                device="xpu",
+             ).float()
+             if has_weight
+             else None
+@@ -251,15 +255,13 @@ class Permute1DSparseFeaturesTest(unittest.TestCase):
+             low=1,
+             high=int(1e5),
+             size=cast(tuple[int, ...], (lengths.sum().item(),)),
+-            device=torch.accelerator.current_accelerator(),
++            device="xpu",
+         ).type(index_dtype)
+ 
+         # Create random permutation for shuffling features
+         permute_list = list(range(T))
+         random.shuffle(permute_list)
+-        permute = torch.IntTensor(permute_list).to(
+-            device=torch.accelerator.current_accelerator()
+-        )
++        permute = torch.IntTensor(permute_list).xpu()
+         # Execute: Call the permute_1D_sparse_data operation
+         (
+             lengths_actual,
+@@ -340,19 +342,19 @@ class Permute2DSparseFeaturesTest(unittest.TestCase):
+         lengths = torch.tensor(
+             [[0, 0, 1], [0, 1, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 1]],
+             dtype=torch.int32,
+-            device=torch.accelerator.current_accelerator(),
++            device="xpu",
+         )
+         indices = torch.tensor(
+             [500, 1000, 1999],
+             dtype=torch.int32,
+-            device=torch.accelerator.current_accelerator(),
++            device="xpu",
+         )
+         permute = torch.tensor(
+             [0, 3, 1, 4, 2, 5],
+             dtype=torch.int32,
+-            device=torch.accelerator.current_accelerator(),
++            device="xpu",
+         )
+-        weights = torch.rand((3, 64), device=torch.accelerator.current_accelerator())
++        weights = torch.rand((3, 64), device="xpu")
+         (
+             lengths_actual,
+             values_actual,
+@@ -366,7 +368,7 @@ class Permute2DSparseFeaturesTest(unittest.TestCase):
+                 torch.tensor(
+                     [[0, 0, 1], [0, 0, 0], [0, 1, 0], [0, 0, 0], [0, 0, 0], [0, 0, 1]],
+                     dtype=torch.int32,
+-                    device=torch.accelerator.current_accelerator(),
++                    device="xpu",
+                 ),
+             )
+         )
 -- 
 2.43.0
-

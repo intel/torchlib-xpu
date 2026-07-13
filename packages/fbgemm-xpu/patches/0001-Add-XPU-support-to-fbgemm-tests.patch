@@ -91,6 +91,7 @@ index edb0d3615..f825ce27c 100644
      def test_lengths_range(self) -> None:
          # When 'output_shape' is None, the function will return a tensor with dynamic shape.
          with self.assertRaisesRegex(
+ 
 diff --git a/fbgemm_gpu/test/sparse/permute_sparse_features_test.py b/fbgemm_gpu/test/sparse/permute_sparse_features_test.py
 index d358f4b8f..a462d45ed 100644
 --- a/fbgemm_gpu/test/sparse/permute_sparse_features_test.py

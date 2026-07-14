@@ -112,7 +112,13 @@ void Permute1DDataKernel<has_weight, offsets_t, indices_t, weights_t>::operator(
     for (int32_t i = tid; i < segment_length; i += threads_per_segment) {
         permuted_indices_[output_start + i] = indices_[input_start + i];
         if constexpr (has_weight) {
-            permuted_weights_[output_start + i] = weights_[input_start + i];
+            // Copy all columns for this row (supports both 1D and 2D weights)
+            const int64_t input_row = input_start + i;
+            const int64_t output_row = output_start + i;
+            for (int64_t col = 0; col < weight_columns_; ++col) {
+                permuted_weights_[output_row * weight_columns_ + col] = 
+                    weights_[input_row * weight_columns_ + col];
+            }
         }
     }
 }
@@ -330,9 +336,16 @@ permute_1D_sparse_data_xpu(
     sycl::range<2> local_range{kThreadsPerSegment, kSegmentsPerBlock};
 
     if (weights.has_value()) {
-        // With weights
+        // With weights - preserve dimensionality (1D or 2D)
         const auto weights_contig = weights->contiguous();
-        permuted_weights = at::empty(permuted_indices_size, weights->options());
+        const int64_t weight_columns = (weights->dim() == 2) ? weights->size(1) : 1;
+        
+        // Create output tensor with same shape as input weights
+        if (weights->dim() == 2) {
+            permuted_weights = at::empty({permuted_indices_size, weight_columns}, weights->options());
+        } else {
+            permuted_weights = at::empty(permuted_indices_size, weights->options());
+        }
 
         AT_DISPATCH_INDEX_TYPES(
             input_offsets.scalar_type(), "permute_1D_data_xpu_offsets", [&] {
@@ -358,7 +371,8 @@ permute_1D_sparse_data_xpu(
                                             input_offsets.data_ptr<offsets_t>(),
                                             output_offsets.data_ptr<offsets_t>(),
                                             permuted_indices.data_ptr<indices_t>(),
-                                            permuted_weights->data_ptr<weights_t>()
+                                            permuted_weights->data_ptr<weights_t>(),
+                                            weight_columns
                                         )
                                     );
                                 });

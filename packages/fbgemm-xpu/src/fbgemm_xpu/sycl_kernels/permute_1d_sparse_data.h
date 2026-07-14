@@ -130,7 +130,8 @@ public:
         const offsets_t* input_offsets,
         const offsets_t* output_offsets,
         indices_t* permuted_indices,
-        weights_t* permuted_weights)
+        weights_t* permuted_weights,
+        int64_t weight_columns = 1)
         : permuted_indices_size_(permuted_indices_size),
           permuted_lengths_size_(permuted_lengths_size),
           indices_(indices),
@@ -139,7 +140,8 @@ public:
           input_offsets_(input_offsets),
           output_offsets_(output_offsets),
           permuted_indices_(permuted_indices),
-          permuted_weights_(permuted_weights) {}
+          permuted_weights_(permuted_weights),
+          weight_columns_(weight_columns) {}
 
     void operator()(const sycl::nd_item<2>& item) const;
 
@@ -153,6 +155,7 @@ private:
     const offsets_t* output_offsets_;
     indices_t* permuted_indices_;
     weights_t* permuted_weights_;
+    int64_t weight_columns_;
 };
 
 // ============================================================================

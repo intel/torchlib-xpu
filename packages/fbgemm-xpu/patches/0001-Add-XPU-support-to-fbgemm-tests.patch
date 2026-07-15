@@ -5,6 +5,7 @@ Subject: [PATCH] Add XPU support to FBGEMM sparse ops tests
 
 Add XPU device support to misc_ops_test.py and permute_sparse_features_test.py.
 Includes support for permute_1D_sparse_data and permute_2D_sparse_data operators.
+Also adds XPU support to test_asynchronous_complete_cumsum_2d in cumsum_test.py.
 
 Signed-off-by: Alberto Gallegos <alberto.gallegos.muro@intel.com>
 ---
@@ -119,5 +120,35 @@ index d358f4b8f..a462d45ed 100644
      @given(
          T=st.integers(min_value=1, max_value=20),
          L=st.integers(min_value=2, max_value=20),
+
+diff --git a/fbgemm_gpu/test/sparse/cumsum_test.py b/fbgemm_gpu/test/sparse/cumsum_test.py
+index 79aad1b55..bf8e9342a 100644
+--- a/fbgemm_gpu/test/sparse/cumsum_test.py
++++ b/fbgemm_gpu/test/sparse/cumsum_test.py
+@@ -29,6 +29,11 @@ else:
+         optests,
+     )
+ 
++# Registers the XPU (Intel GPU) FBGEMM operator implementations.
++import fbgemm_xpu  # noqa: F401, E402
++
++xpu_available: bool = torch.xpu.is_available()
++
+ 
+ class CumSumTest(unittest.TestCase):
+     @given(
+@@ -106,7 +111,11 @@ class CumSumTest(unittest.TestCase):
+                 (torch.float32, np.float32),
+             ]
+         ),
+-        device=cpu_and_maybe_gpu(),
++        device=st.sampled_from(
++            [torch.device("cpu")]
++            + ([torch.device("cuda")] if not gpu_unavailable[0] else [])
++            + ([torch.device("xpu")] if xpu_available else [])
++        ),
+     )
+     @settings(verbosity=Verbosity.verbose, max_examples=20, deadline=None)
+     def test_asynchronous_complete_cumsum_2d(
 -- 
 2.43.0

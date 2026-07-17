@@ -1,4 +1,4 @@
-name: ci
+name: TorchCodec CI
 
 # This workflow builds manylinux torchlib wheels as they will appear
 # in the production environment. The challenging part is to create
@@ -16,10 +16,16 @@ on:
     branches:
       - main
       - 'release/**'
+    paths:
+      - 'packages/torchcodec-xpu/**'
+      - '.github/workflows/torchcodec-ci.yml'
   pull_request:
     branches:
       - main
       - 'release/**'
+    paths:
+      - 'packages/torchcodec-xpu/**'
+      - '.github/workflows/torchcodec-ci.yml'
   release:
     types:
       - published      

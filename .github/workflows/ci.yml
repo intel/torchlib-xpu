@@ -196,8 +196,24 @@ jobs:
         path: _wheels/
         compression-level: 0
 
+  identify-changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      torchcodec-xpu: ${{ steps.changes.outputs.torchcodec-xpu }}
+      fbgemm-xpu: ${{ steps.changes.outputs.fbgemm-xpu }}
+    steps:
+      - uses: dorny/paths-filter@v4
+        id: changes
+        with:
+          filters: |
+            torchcodec-xpu:
+              - 'packages/torchcodec-xpu/**'
+            fbgemm-xpu:
+              - 'packages/fbgemm-xpu/**'
+
   test-torchcodec:
-    needs: build
+    needs: [ build, identify-changes ]
+    if: github.event_name == 'release' || needs.identify-changes.outputs.torchcodec-xpu == 'true'
     strategy:
       matrix:
         ffmpeg-version: [ '6', '7', '8' ]
@@ -303,6 +319,7 @@ jobs:
 
   publish:
     needs: [ compose, test-torchcodec ]
+    if: ${{ !(failure() || cancelled()) }}
     runs-on: ubuntu-24.04
     permissions:
       id-token: write    

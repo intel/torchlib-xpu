@@ -6,9 +6,6 @@ import ctypes
 import importlib
 import traceback
 
-import torch
-import torchcodec
-
 try:
     # Note that version.py is generated during install
     from ._version import __version__
@@ -23,6 +20,12 @@ def _get_extension_path(lib_name: str) -> str:
     return spec.origin
 
 def load_torchcodec_xpu_shared_library():
+    import torch
+
+    # Loading torchcodec at globabl scope will create a circular
+    # dependency for plugin loading and must be avoided.
+    import torchcodec
+
     exceptions = []
     ffmpeg_major_version = torchcodec.ffmpeg_major_version
     xpu_library_name = f"torchcodec_xpu.xpu_ops{ffmpeg_major_version}"
@@ -52,6 +55,3 @@ def load_torchcodec_xpu_shared_library():
         """
         f"{traceback_info}"
     )
-
-load_torchcodec_xpu_shared_library()
-

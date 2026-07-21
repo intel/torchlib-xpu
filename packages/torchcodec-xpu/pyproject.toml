@@ -25,6 +25,9 @@ dependencies = [
 [project.urls]
 GitHub = "https://github.com/intel/torchlib-xpu"
 
+[project.entry-points.'torchcodec.backends']
+device_backend = 'torchcodec_xpu:load_torchcodec_xpu_shared_library'
+
 [project.optional-dependencies]
 test = [
     "numpy",

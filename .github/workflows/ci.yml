@@ -203,7 +203,8 @@ jobs:
         ffmpeg-version: [ '6', '7', '8' ]
         # Testing in minimum and maximum supported versions of python.
         python-version: [ '3.10', '3.14' ]
-        runner: [ 'bmg', 'dg2' ]
+        # TODO: re-enable dg2 runner after https://github.com/intel/torchlib-xpu/issues/94
+        runner: [ 'bmg' ]
         # Default fallback value for standard matrix combinations
         cpu_fallback: [ false ]
 

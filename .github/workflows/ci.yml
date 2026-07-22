@@ -199,12 +199,20 @@ jobs:
   identify-changes:
     runs-on: ubuntu-24.04
     outputs:
-      torchcodec-xpu: ${{ steps.changes.outputs.torchcodec-xpu }}
-      fbgemm-xpu: ${{ steps.changes.outputs.fbgemm-xpu }}
+      torchcodec-xpu: ${{ github.event_name == 'release' && 'true' || steps.changes.outputs.torchcodec-xpu }}
+      fbgemm-xpu: ${{ github.event_name == 'release' && 'true' || steps.changes.outputs.fbgemm-xpu }}
     steps:
-      - uses: dorny/paths-filter@v4
+      - name: 'Checkout'
+        if: github.event_name != 'release'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: 'Identify changes'
+        if: github.event_name != 'release'
+        uses: dorny/paths-filter@v4
         id: changes
         with:
+          base: ${{ github.event.before || 'HEAD~1' }}
           filters: |
             torchcodec-xpu:
               - 'packages/torchcodec-xpu/**'
@@ -213,7 +221,7 @@ jobs:
 
   test-torchcodec:
     needs: [ build, identify-changes ]
-    if: github.event_name == 'release' || needs.identify-changes.outputs.torchcodec-xpu == 'true'
+    if: needs.identify-changes.outputs.torchcodec-xpu == 'true'
     strategy:
       matrix:
         ffmpeg-version: [ '6', '7', '8' ]

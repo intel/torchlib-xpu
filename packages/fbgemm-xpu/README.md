@@ -25,7 +25,7 @@ For now, build from source:
 
 * Install [uv]
 
-* Install Intel oneAPI (DPC++ compiler `icpx`), version 2025.3 or newer
+* Install Intel oneAPI (DPC++ compiler `icpx`), version 2026.0
 
 * Clone the repository:
 
@@ -71,4 +71,3 @@ Known limitations will be documented as new FBGEMM operators are integrated into
 [FBGEMM]: https://github.com/pytorch/FBGEMM
 [uv]: https://github.com/astral-sh/uv
 [PVC]: https://www.intel.com/content/www/us/en/ark/products/series/232874/intel-data-center-gpu-max-series.html
-

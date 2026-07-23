@@ -91,7 +91,7 @@ jobs:
     env:
       WHEELS: torchlib-${{ matrix.python-version }}-wheels
     container:
-      image: 'pytorch/manylinux2_28-builder:xpu-v2.12.0-rc1'
+      image: 'pytorch/manylinux2_28-builder:xpu-v2.13.0-rc1'
     steps:
     - name: 'Checkout'
       uses: actions/checkout@v7

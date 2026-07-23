@@ -40,7 +40,7 @@ pip install torchlib-xpu \
 
 * Install [uv]
 
-* Install oneAPI [2025.3]
+* Install oneAPI [2026.0]
 
 * Install FFmpeg development environment with enabled VAAPI hardware acceleration. For example:
 
@@ -88,4 +88,4 @@ uv venv && uv pip install -e . \
 [TorchCodec]: https://github.com/meta-pytorch/torchcodec
 [uv]: https://github.com/astral-sh/uv
 
-[2025.3]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-10.html
+[2026.0]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-13.html

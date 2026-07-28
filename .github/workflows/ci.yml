@@ -393,13 +393,11 @@ jobs:
     - name: 'Patch FBGEMM'
       working-directory: fbgemm
       run: |
-        # TODO: Apply XPU patches here
-        echo "Patches will be applied here"
+        git am ../torchlib-xpu/packages/fbgemm-xpu/patches/0001-Add-XPU-support-to-fbgemm-tests.patch
     - name: 'Test fbgemm-xpu'
       working-directory: fbgemm
       run: |
-        # TODO: Run pytest commands to run the XPU tests here
-        echo "Instructions to run the tests will be added here"
+        pytest -rsf fbgemm_gpu/test/sparse/misc_ops_test.py
 
   publish:
     needs: [ compose, test-torchcodec, test-fbgemm ]

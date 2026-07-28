@@ -184,8 +184,12 @@ jobs:
   identify-changes:
     runs-on: ubuntu-24.04
     outputs:
-      torchcodec-xpu: ${{ github.event_name == 'release' && 'true' || steps.changes.outputs.torchcodec-xpu }}
-      fbgemm-xpu: ${{ github.event_name == 'release' && 'true' || steps.changes.outputs.fbgemm-xpu }}
+      torchcodec-xpu: ${{ (github.event_name == 'release' ||
+                             contains(github.event.pull_request.labels.*.name, 'test-all')) && 'true' ||
+                          steps.changes.outputs.torchcodec-xpu }}
+      fbgemm-xpu: ${{ (github.event_name == 'release' ||
+                         contains(github.event.pull_request.labels.*.name, 'test-all')) && 'true' ||
+                      steps.changes.outputs.fbgemm-xpu }}
     steps:
       - name: 'Checkout'
         if: github.event_name != 'release'
@@ -296,7 +300,7 @@ jobs:
           --extra-index-url https://download.pytorch.org/whl/xpu
     - name: 'Test gpu'
       run: |
-        python -c "import torch; print(torch.xpu.is_available())"
+        python -c "import torch; assert torch.xpu.is_available(), 'XPU (Intel GPU) is not available'"
     - name: 'Patch torchcodec'
       working-directory: torchcodec
       run: |
@@ -385,7 +389,7 @@ jobs:
           --extra-index-url https://download.pytorch.org/whl/xpu
     - name: 'Test gpu'
       run: |
-        python -c "import torch; print(torch.xpu.is_available())" 
+        python -c "import torch; assert torch.xpu.is_available(), 'XPU (Intel GPU) is not available'"
     - name: 'Patch FBGEMM'
       working-directory: fbgemm
       run: |

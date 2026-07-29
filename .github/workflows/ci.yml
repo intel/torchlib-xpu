@@ -213,30 +213,49 @@ jobs:
     if: needs.identify-changes.outputs.torchcodec-xpu == 'true'
     strategy:
       matrix:
-        ffmpeg-version: [ '6', '7', '8' ]
+        # Ubuntu 24.04 comes with ffmpeg version 6
+        # Ubuntu 26.04 comes with ffmpeg version 8
+        image: [ 'ubuntu:24.04', 'ubuntu:26.04' ]
         # Testing in minimum and maximum supported versions of python.
-        python-version: [ '3.10', '3.14' ]
+        python-version: [ '3.10', '3.11', '3.12', '3.13', '3.14' ]
         # TODO: re-enable dg2 runner after https://github.com/intel/torchlib-xpu/issues/94
         runner: [ 'bmg' ]
         # Default fallback value for standard matrix combinations
-        cpu_fallback: [ false ]
+        cpu_fallback: [ false ]  # fallback not allowed
+        force_cpu_fallback: [ false ]
 
         include:
-        - ffmpeg-version: '8'
+        # This verifies default behavior when CPU fallback is allowed and not forced
+        - image: 'ubuntu:26.04'
           python-version: '3.14'
           runner: 'bmg'
           cpu_fallback: true
+          force_cpu_fallback: false
+        # This verifies forced fallback scenario when decoding is entirely on CPU
+        - image: 'ubuntu:26.04'
+          python-version: '3.14'
+          runner: 'bmg'
+          cpu_fallback: true
+          force_cpu_fallback: true
     runs-on: ${{matrix.runner}}
     container:
-      image: 'ubuntu:24.04'
+      image: '${{ matrix.image }}'
       options: --device /dev/dri:/dev/dri -v /dev/dri/by-path:/dev/dri/by-path
     env:
-      FORCE_CPU_FALLBACK: ${{ matrix.cpu_fallback == true }}
+      CPU_FALLBACK: ${{ matrix.cpu_fallback == true }}
+      FORCE_CPU_FALLBACK: ${{ matrix.force_cpu_fallback == true }}
+      TORCHCODEC_XPU_LOG_LEVEL: '3'  # info
       WHEELS: torchlib-${{ matrix.python-version }}-wheels
-    defaults:
-      run:
-        shell: bash -l {0}  # for conda environment activation
     steps:
+    - name: 'Cleanup'
+      run: |
+        rm -rf .torchlib-xpu-venv
+        rm -rf _wheels
+        rm -rf _tools
+    - name: 'Set AGENT_TOOLSDIRECTORY'
+      run: |
+        # For https://github.com/actions/setup-python/issues/1087
+        echo "AGENT_TOOLSDIRECTORY=$GITHUB_WORKSPACE/_tools" >> $GITHUB_ENV
     - name: 'Install prerequisites'
       run: |
         apt-get update
@@ -254,65 +273,64 @@ jobs:
       with:
         name: ${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}
         path: _wheels/
-    - name: 'Checkout'
+    - name: 'Checkout torchlib-xpu'
       uses: actions/checkout@v7
       with:
         path: torchlib-xpu
-    - name: 'Checkout'
+    - name: 'Checkout torchcodec'
       uses: actions/checkout@v7
       with:
         repository: meta-pytorch/torchcodec
         ref: v0.15.0
         path: torchcodec
-    - name: 'Setup Conda'
-      uses: conda-incubator/setup-miniconda@v4
-      with:
-        # conda configuration
-        auto-update-conda: false
-        channels: conda-forge
-        channel-priority: strict
-        conda-remove-defaults: true
-        miniforge-version: latest
-        use-mamba: true
-        # environment configuration
-        activate-environment: test-env
-        python-version: ${{ matrix.python-version }}
-    - name: 'Install Intel drivers'
+        clean: true
+    - name: 'Patch torchcodec'
+      working-directory: torchcodec
+      run: |
+        rm -rf .git/rebase-apply
+        git am ../torchlib-xpu/packages/torchcodec-xpu/patches/0001-Add-XPU-support-to-tests.patch
+    - name: 'Install FFmpeg and Intel drivers'
       run: |
         add-apt-repository -y ppa:kobuk-team/intel-graphics
+        # Uncomment below to install packages available at specific date
+        # echo "Snapshot: 20260624T090400Z" >> /etc/apt/sources.list.d/kobuk-team-ubuntu-intel-graphics-noble.sources
+        # apt-get update
         apt-get install -y \
+          ffmpeg \
           libva2 \
           libze1 \
           libze-intel-gpu1 \
           intel-media-va-driver-non-free \
-          intel-opencl-icd
-    - name: 'Install FFmpeg ${{ matrix.ffmpeg-version }}'
-      run: |
-        conda install ffmpeg=${{ matrix.ffmpeg-version }} pip
-    - name: 'Verify FFmpeg'
+          intel-opencl-icd \
+    - name: 'Print FFmpeg version'
       run: |
         ffmpeg -version
+    - name: 'Set up Python ${{ matrix.python-version }}'
+      uses: actions/setup-python@v7
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: 'Create virtual environment'
+      run: |
+        rm -rf .torchlib-xpu-venv
+        python -m venv .torchlib-xpu-venv
+        echo "$GITHUB_WORKSPACE/.torchlib-xpu-venv/bin" >> $GITHUB_PATH
     - name: 'Install torchcodec'
       run: |
         find _wheels/ -name "*.whl"
-        pip install \
+        pip install --no-cache-dir \
           "$(ls ./_wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/torchcodec*.whl)[test]" \
           --extra-index-url https://download.pytorch.org/whl/xpu
     - name: 'Test gpu'
       run: |
         python -c "import torch; assert torch.xpu.is_available(), 'XPU (Intel GPU) is not available'"
-    - name: 'Patch torchcodec'
-      working-directory: torchcodec
-      run: |
-        git am ../torchlib-xpu/packages/torchcodec-xpu/patches/0001-Add-XPU-support-to-tests.patch
     - name: 'Test'
       working-directory: torchcodec
       run: |
-        if [ "$FORCE_CPU_FALLBACK" == "true" ] || [ "${{matrix.runner}}" == "dg2" ]; then
+        if [ "$FORCE_CPU_FALLBACK" = "true" ] || [ "${{ matrix.image }}" = "ubuntu:24.04" ] || [ "${{ matrix.runner }}" = "dg2" ]; then
           # On dg2 see: https://github.com/intel/media-driver/issues/1954
           known_failures="not test_get_frame_at_av1[xpu]"
         fi
-        pytest -rsf -k "${known_failures}" test/
+        pytest -rsf --capture=no -k "${known_failures}" test/
 
   test-fbgemm:
     needs: [ build, identify-changes ]
@@ -328,10 +346,16 @@ jobs:
       options: --device /dev/dri:/dev/dri -v /dev/dri/by-path:/dev/dri/by-path
     env:
       WHEELS: torchlib-${{ matrix.python-version }}-wheels
-    defaults:
-      run:
-        shell: bash -l {0}  # for conda environment activation
     steps:
+    - name: 'Cleanup'
+      run: |
+        rm -rf .torchlib-xpu-venv
+        rm -rf _wheels
+        rm -rf _tools
+    - name: Set AGENT_TOOLSDIRECTORY
+      run: |
+        # For https://github.com/actions/setup-python/issues/1087
+        echo "AGENT_TOOLSDIRECTORY=$GITHUB_WORKSPACE/_tools" >> $GITHUB_ENV
     - name: 'Install prerequisites'
       run: |
         apt-get update
@@ -349,29 +373,22 @@ jobs:
       with:
         name: ${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}
         path: _wheels/
-    - name: 'Checkout'
+    - name: 'Checkout torchlib-xpu'
       uses: actions/checkout@v7
       with:
         path: torchlib-xpu
-    - name: 'Checkout'
+    - name: 'Checkout fbgemm'
       uses: actions/checkout@v7
       with:
         repository: pytorch/FBGEMM
         ref: v1.8.0
         path: fbgemm
-    - name: 'Setup Conda'
-      uses: conda-incubator/setup-miniconda@v4
-      with:
-        # conda configuration
-        auto-update-conda: false
-        channels: conda-forge
-        channel-priority: strict
-        conda-remove-defaults: true
-        miniforge-version: latest
-        use-mamba: true
-        # environment configuration
-        activate-environment: test-env
-        python-version: ${{ matrix.python-version }}
+        clean: true
+    - name: 'Patch FBGEMM'
+      working-directory: fbgemm
+      run: |
+        rm -rf .git/rebase-apply
+        git am ../torchlib-xpu/packages/fbgemm-xpu/patches/0001-Add-XPU-support-to-fbgemm-tests.patch
     - name: 'Install Intel drivers'
       run: |
         add-apt-repository -y ppa:kobuk-team/intel-graphics
@@ -379,21 +396,23 @@ jobs:
           libze1 \
           libze-intel-gpu1 \
           intel-ocloc
-    - name: 'Install pip'
+    - name: 'Set up Python ${{ matrix.python-version }}'
+      uses: actions/setup-python@v7
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: 'Create virtual environment'
       run: |
-        conda install pip
+        rm -rf .torchlib-xpu-venv
+        python -m venv .torchlib-xpu-venv
+        echo "$GITHUB_WORKSPACE/.torchlib-xpu-venv/bin" >> $GITHUB_PATH
     - name: 'Install fbgemm-xpu'
       run: |
-        pip install \
+        pip install --no-cache-dir \
           "$(ls ./_wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/fbgemm_xpu*.whl)[test]" \
           --extra-index-url https://download.pytorch.org/whl/xpu
     - name: 'Test gpu'
       run: |
         python -c "import torch; assert torch.xpu.is_available(), 'XPU (Intel GPU) is not available'"
-    - name: 'Patch FBGEMM'
-      working-directory: fbgemm
-      run: |
-        git am ../torchlib-xpu/packages/fbgemm-xpu/patches/0001-Add-XPU-support-to-fbgemm-tests.patch
     - name: 'Test fbgemm-xpu'
       working-directory: fbgemm
       run: |

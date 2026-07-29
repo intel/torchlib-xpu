@@ -398,6 +398,7 @@ jobs:
       working-directory: fbgemm
       run: |
         pytest -rsf fbgemm_gpu/test/sparse/misc_ops_test.py
+        pytest -rsf fbgemm_gpu/test/sparse/permute_sparse_features_test.py
 
   publish:
     needs: [ compose, test-torchcodec, test-fbgemm ]

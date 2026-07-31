@@ -30,6 +30,8 @@ pip install torchcodec-xpu \
 
 The following environment variables can be used to customize the behavior of Intel Plugin for TorchCodec:
 
+* `TORCHCODEC_XPU_LOG_LEVEL=0|1|2|3|4` (default: `0`) - log level.
+
 * `USE_SYCL_KERNELS = on|off` (default: `off`) - use SYCL kernels for augmentation such as color space conversion instead of VAAPI interface. If SYCL kernels are requested but can not be used due to hardware limitations, then fallback to VAAPI will be attempted.
 
 * `CPU_FALLBACK=on|off` (default: `on`) - allow CPU fallback.

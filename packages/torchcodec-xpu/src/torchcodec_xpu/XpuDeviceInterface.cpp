@@ -27,6 +27,7 @@ namespace facebook::torchcodec {
 
 namespace xpu {
 
+const char* LOG_LEVEL = std::getenv("TORCHCODEC_XPU_LOG_LEVEL");
 const char* USE_SYCL_KERNELS = std::getenv("USE_SYCL_KERNELS");
 const char* CPU_FALLBACK = std::getenv("CPU_FALLBACK");
 const char* FORCE_CPU_FALLBACK = std::getenv("FORCE_CPU_FALLBACK");
@@ -80,6 +81,42 @@ inline bool force_cpu_fallback() {
   }
   return to_bool(FORCE_CPU_FALLBACK);
 }
+
+enum {
+    NONE = 0,
+    ERROR = 1,
+    WARNING = 2,
+    INFO = 3,
+    VERBOSE = 4
+};
+
+inline int debug_level() {
+  if (!LOG_LEVEL) {
+    return NONE;
+  }
+
+  std::string level(LOG_LEVEL);
+
+  if (level == "0") return NONE;
+  else if (level == "1") return ERROR;
+  else if (level == "2") return WARNING;
+  else if (level == "3") return INFO;
+  else if (level == "4") return VERBOSE;
+
+  return NONE;
+}
+
+inline int get_debug_level() {
+  static int level = debug_level();
+  return level;
+}
+
+#define DEBUG_LOG(L, M) \
+  do { \
+    if ((L) <= xpu::get_debug_level()) { \
+      std::cout << "[torchcodec-xpu] " << M << "\n"; \
+    } \
+  } while (0)
 
 bool has_fp64(const StableDevice& device) {
   int deviceIndex = get_device_index(device);
@@ -180,15 +217,15 @@ XpuDeviceInterface::XpuDeviceInterface(const StableDevice& device)
   }
 
   if (xpu::use_sycl_color_conversion_kernel()) {
-    VLOG(1) << "XpuDeviceInterface initialized with SYCL kernel backend";
-    VLOG(1) << "Backend: SYCL_KERNEL (Direct NV12→RGB)";
+    DEBUG_LOG(xpu::INFO, "XpuDeviceInterface initialized with SYCL kernel backend");
+    DEBUG_LOG(xpu::INFO, "Backend: SYCL_KERNEL (Direct NV12→RGB)");
   } else {
-    VLOG(1) << "XpuDeviceInterface initialized with VAAPI filter graph backend";
-    VLOG(1) << "Backend: VAAPI_FILTER (Flexible, with scaling)";
+    DEBUG_LOG(xpu::INFO, "XpuDeviceInterface initialized with VAAPI filter graph backend");
+    DEBUG_LOG(xpu::INFO, "Backend: VAAPI_FILTER (Flexible, with scaling)");
   }
 
   has_fp64_ = xpu::has_fp64(device);
-  VLOG(1) << "Device supports FP64: " << has_fp64_;
+  DEBUG_LOG(xpu::INFO, "Device supports FP64: " << has_fp64_);
 }
 
 XpuDeviceInterface::~XpuDeviceInterface() {
@@ -226,7 +263,7 @@ void XpuDeviceInterface::initialize_video(
 void XpuDeviceInterface::register_hardware_device_with_codec(
     AVCodecContext* codec_context) {
   if (!ctx_) {
-    VLOG(1) << "HW context not initialized, falling back to CPU";
+    DEBUG_LOG(xpu::INFO, "HW context not initialized, falling back to CPU");
     return;
   }
   TORCH_CHECK(codec_context != nullptr, "codec_context is null");
@@ -367,6 +404,7 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output(
     // general or on this particular device. In this case we have a frame on the
     // CPU. We send the frame back to the XPU device when we're done.
 
+    DEBUG_LOG(xpu::VERBOSE, "Incoming frame is on CPU, forwarding to CPU conversion");
     TORCH_CHECK(xpu::cpu_fallback(), "CPU fallback not allowed");
 
     FrameOutput cpuFrameOutput;
@@ -417,14 +455,14 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output(
   auto end = std::chrono::high_resolution_clock::now();
 
   std::chrono::duration<double, std::micro> duration = end - start;
-  VLOG(9) << "Conversion of frame height=" << frameDims.height << " width=" << frameDims.width
-          << " took: " << duration.count() << "us" << std::endl;
+  DEBUG_LOG(xpu::VERBOSE, "Conversion of frame height=" << frameDims.height << " width=" << frameDims.width
+      << " took: " << duration.count() << "us" << std::endl);
 }
 
 void XpuDeviceInterface::convert_av_frame_to_frame_output_with_filter_graph(
     UniqueAVFrame& av_frame,
     torch::stable::Tensor& dst) {
-  VLOG(1) << "Using VAAPI filter graph backend for conversion";
+  DEBUG_LOG(xpu::VERBOSE, "Using VAAPI filter graph backend for conversion");
   auto frameDims = FrameDims(av_frame->height, av_frame->width);
 
   // We need to compare the current frame context with our previous frame
@@ -483,7 +521,7 @@ bool XpuDeviceInterface::convert_av_frame_to_frame_output_with_sycl(
   }
 
 #ifdef WITH_SYCL_KERNELS
-  VLOG(1) << "Using SYCL kernel backend for conversion";
+  DEBUG_LOG(xpu::VERBOSE, "Using SYCL kernel backend for conversion");
   TORCH_CHECK_EQ(frame->format, AV_PIX_FMT_VAAPI);
   VADRMPRIMESurfaceDescriptor desc{};
   VAStatus sts = vaExportSurfaceHandle(

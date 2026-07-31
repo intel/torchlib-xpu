@@ -28,6 +28,7 @@ namespace facebook::torchcodec {
 namespace xpu {
 
 const char* USE_SYCL_KERNELS = std::getenv("USE_SYCL_KERNELS");
+const char* CPU_FALLBACK = std::getenv("CPU_FALLBACK");
 const char* FORCE_CPU_FALLBACK = std::getenv("FORCE_CPU_FALLBACK");
 
 static bool g_xpu = register_device_interface(
@@ -64,6 +65,13 @@ inline bool use_sycl_color_conversion_kernel() {
   }
   return to_bool(USE_SYCL_KERNELS);
 #endif
+}
+
+inline bool cpu_fallback() {
+  if (!CPU_FALLBACK) {
+    return true;
+  }
+  return to_bool(CPU_FALLBACK);
 }
 
 inline bool force_cpu_fallback() {
@@ -358,6 +366,8 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output(
     // Typically that happens if the video's decoder isn't supported by VAAPI in
     // general or on this particular device. In this case we have a frame on the
     // CPU. We send the frame back to the XPU device when we're done.
+
+    TORCH_CHECK(xpu::cpu_fallback(), "CPU fallback not allowed");
 
     FrameOutput cpuFrameOutput;
     cpu_interface_->convert_av_frame_to_frame_output(av_frame, cpuFrameOutput);

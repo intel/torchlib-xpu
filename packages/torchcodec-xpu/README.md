@@ -32,7 +32,9 @@ The following environment variables can be used to customize the behavior of Int
 
 * `USE_SYCL_KERNELS = on|off` (default: `off`) - use SYCL kernels for augmentation such as color space conversion instead of VAAPI interface. If SYCL kernels are requested but can not be used due to hardware limitations, then fallback to VAAPI will be attempted.
 
-* `FORCE_CPU_FALLBACL=on|off` (default: `off`) - force CPU fallback.
+* `CPU_FALLBACK=on|off` (default: `on`) - allow CPU fallback.
+
+* `FORCE_CPU_FALLBACK=on|off` (default: `off`) - force CPU fallback.
 
 ## Known limitations
 

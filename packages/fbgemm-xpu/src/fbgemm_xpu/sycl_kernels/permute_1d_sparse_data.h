@@ -63,13 +63,13 @@ namespace fbgemm_xpu {
  *
  * Simple element-parallel kernel: permuted_lengths[i] = lengths[permute[i]]
  */
-template <typename index_t>
+template <typename index_t, typename permute_t = int32_t>
 class Permute1DLengthsKernel {
 public:
     Permute1DLengthsKernel(
         int64_t permuted_lengths_size,
         const index_t* lengths,
-        const int32_t* permute,
+        const permute_t* permute,
         index_t* permuted_lengths)
         : permuted_lengths_size_(permuted_lengths_size),
           lengths_(lengths),
@@ -81,7 +81,7 @@ public:
 private:
     int64_t permuted_lengths_size_;
     const index_t* lengths_;
-    const int32_t* permute_;
+    const permute_t* permute_;
     index_t* permuted_lengths_;
 };
 

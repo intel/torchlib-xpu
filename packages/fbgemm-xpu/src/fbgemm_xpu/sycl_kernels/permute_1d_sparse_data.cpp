@@ -66,8 +66,8 @@ namespace fbgemm_xpu {
 /**
  * @brief Permute1DLengthsKernel operator implementation
  */
-template <typename index_t>
-void Permute1DLengthsKernel<index_t>::operator()(
+template <typename index_t, typename permute_t>
+void Permute1DLengthsKernel<index_t, permute_t>::operator()(
     const sycl::nd_item<1>& item) const {
     const int64_t i = item.get_global_id(0);
     if (i < permuted_lengths_size_) {
@@ -285,29 +285,31 @@ permute_1D_sparse_data_xpu(
     at::Tensor permuted_lengths = at::empty({permuted_lengths_size}, lengths.options());
 
     // Launch lengths permutation kernel
-    {
-        constexpr int kLocalSize = 256;
-        const int64_t global_size = ((permuted_lengths_size + kLocalSize - 1) / kLocalSize) * kLocalSize;
+    constexpr int kLocalSize = 256;
+    const int64_t global_size = ((permuted_lengths_size + kLocalSize - 1) / kLocalSize) * kLocalSize;
 
+    AT_DISPATCH_INDEX_TYPES(
+    permute.scalar_type(), "permute_1D_lengths_permute_type", [&] {
+    using permute_t = index_t;
         AT_DISPATCH_INDEX_TYPES(
             lengths.scalar_type(), "permute_1D_lengths_xpu", [&] {
                 queue.submit([&](sycl::handler& cgh) {
-                    cgh.parallel_for<Permute1DLengthsKernel<index_t>>(
+                    cgh.parallel_for<Permute1DLengthsKernel<index_t, permute_t>>(
                         sycl::nd_range<1>(
                             sycl::range<1>(global_size),
                             sycl::range<1>(kLocalSize)
                         ),
-                        Permute1DLengthsKernel<index_t>(
+                        Permute1DLengthsKernel<index_t, permute_t>(
                             permuted_lengths_size,
                             lengths_contig.data_ptr<index_t>(),
-                            permute_contig.data_ptr<int32_t>(),
+                            permute_contig.data_ptr<permute_t>(),
                             permuted_lengths.data_ptr<index_t>()
                         )
                     );
                 });
             }
         );
-    }
+    });
 
     // Phase 2: Compute input and output offsets
     at::Tensor input_offsets = exclusive_cumsum_xpu<int64_t>(lengths_contig);

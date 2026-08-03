@@ -73,4 +73,16 @@ TORCH_LIBRARY_FRAGMENT(fbgemm, m)
             "asynchronous_complete_cumsum(Tensor t_in) -> Tensor"
         );
     }
+
+    if (!utils::torch::schemaExists("fbgemm::asynchronous_exclusive_cumsum")) {
+        m.def(
+            "asynchronous_exclusive_cumsum(Tensor t_in) -> Tensor"
+        );
+    }
+
+    if (!utils::torch::schemaExists("fbgemm::asynchronous_inclusive_cumsum")) {
+        m.def(
+            "asynchronous_inclusive_cumsum(Tensor t_in) -> Tensor"
+        );
+    }
 }

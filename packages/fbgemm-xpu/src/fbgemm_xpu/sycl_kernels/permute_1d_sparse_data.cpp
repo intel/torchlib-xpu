@@ -56,6 +56,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "permute_1d_sparse_data.h"
+#include "sparse_async_cumsum.h"
 
 namespace fbgemm_xpu {
 
@@ -121,78 +122,6 @@ void Permute1DDataKernel<has_weight, offsets_t, indices_t, weights_t>::operator(
             }
         }
     }
-}
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-////////////////////////////////////////////////////////////////////////////////
-// exclusive_cumsum_xpu - Helper Function
-////////////////////////////////////////////////////////////////////////////////
-//
-// CUDA SOURCE MAPPING:
-//   CUDA Function: asynchronous_exclusive_cumsum_gpu
-//   CUDA File: fbgemm_gpu/src/sparse_ops/sparse_ops_gpu.cu
-//
-// DESCRIPTION:
-//   Computes exclusive prefix sum (cumulative sum with 0 prepended).
-//   Used to convert lengths array to offsets array for jagged tensor access.
-//
-//   Example: input = [3, 2, 4] → output = [0, 3, 5, 9]
-//
-////////////////////////////////////////////////////////////////////////////////
-
-/**
- * @brief Compute exclusive cumsum (prefix sum) for offsets
- *
- * output[0] = 0
- * output[i] = sum(input[0:i]) for i > 0
- */
-template <typename T>
-at::Tensor exclusive_cumsum_xpu(const at::Tensor& input) {
-    auto output = at::empty({input.numel() + 1}, input.options().dtype(at::kLong));
-    output[0] = 0;
-    if (input.numel() > 0) {
-        auto cumsum = input.cumsum(0, at::kLong);
-        output.slice(0, 1).copy_(cumsum);
-    }
-    return output;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// complete_cumsum_xpu - Helper Function
-////////////////////////////////////////////////////////////////////////////////
-//
-// CUDA SOURCE MAPPING:
-//   CUDA Function: asynchronous_complete_cumsum_gpu
-//   CUDA File: fbgemm_gpu/src/sparse_ops/sparse_ops_gpu.cu
-//
-// DESCRIPTION:
-//   Computes complete cumulative sum (inclusive prefix sum with 0 prepended).
-//   Used to convert permuted lengths to output offsets.
-//
-//   Identical to exclusive_cumsum_xpu in current implementation.
-//   Example: input = [4, 3, 2] → output = [0, 4, 7, 9]
-//
-////////////////////////////////////////////////////////////////////////////////
-
-/**
- * @brief Compute complete cumsum (inclusive + final element)
- *
- * output[0] = 0
- * output[i] = sum(input[0:i]) for i > 0
- * output[n] = sum(all input)
- */
-template <typename T>
-at::Tensor complete_cumsum_xpu(const at::Tensor& input) {
-    auto output = at::empty({input.numel() + 1}, input.options().dtype(at::kLong));
-    output[0] = 0;
-    if (input.numel() > 0) {
-        auto cumsum = input.cumsum(0, at::kLong);
-        output.slice(0, 1).copy_(cumsum);
-    }
-    return output;
 }
 
 // ============================================================================
@@ -312,8 +241,8 @@ permute_1D_sparse_data_xpu(
     });
 
     // Phase 2: Compute input and output offsets
-    at::Tensor input_offsets = exclusive_cumsum_xpu<int64_t>(lengths_contig);
-    at::Tensor output_offsets = complete_cumsum_xpu<int64_t>(permuted_lengths);
+    at::Tensor input_offsets = asynchronous_exclusive_cumsum_xpu(lengths_contig);
+    at::Tensor output_offsets = asynchronous_complete_cumsum_xpu(permuted_lengths.flatten());
 
     // Phase 3: Determine output size
     int64_t permuted_indices_size = 0;

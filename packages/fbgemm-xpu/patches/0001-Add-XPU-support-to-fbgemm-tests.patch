@@ -13,7 +13,8 @@ Signed-off-by: Alberto Gallegos <alberto.gallegos.muro@intel.com>
  fbgemm_gpu/test/sparse/misc_ops_test.py            | 18 ++++++++++++++----
  .../test/sparse/permute_sparse_features_test.py    |  9 +++++++--
  fbgemm_gpu/test/sparse/cumsum_test.py              | 19 ++++++++++++++++---
- 3 files changed, 37 insertions(+), 9 deletions(-)
+ fbgemm_gpu/test/test_utils.py                      |  5 ++++-
+ 4 files changed, 41 insertions(+), 10 deletions()
 
 diff --git a/fbgemm_gpu/test/sparse/misc_ops_test.py b/fbgemm_gpu/test/sparse/misc_ops_test.py
 index edb0d36..f825ce2 100644
@@ -125,42 +126,6 @@ diff --git a/fbgemm_gpu/test/sparse/cumsum_test.py b/fbgemm_gpu/test/sparse/cums
 index 79aad1b..120ebc5 100644
 --- a/fbgemm_gpu/test/sparse/cumsum_test.py
 +++ b/fbgemm_gpu/test/sparse/cumsum_test.py
-@@ -29,6 +29,11 @@ else:
-         optests,
-     )
- 
-+# Registers the XPU (Intel GPU) FBGEMM operator implementations.
-+import fbgemm_xpu  # noqa: F401, E402
-+
-+xpu_available: bool = torch.xpu.is_available()
-+
- 
- class CumSumTest(unittest.TestCase):
-     @given(
-@@ -40,7 +45,10 @@ class CumSumTest(unittest.TestCase):
-                 (torch.float32, np.float32),
-             ]
-         ),
--        device=cpu_and_maybe_gpu(),
-+        device=st.one_of(
-+            cpu_and_maybe_gpu(),
-+            st.sampled_from([torch.device("xpu")] if xpu_available else []),
-+        ),
-     )
-     @settings(verbosity=Verbosity.verbose, max_examples=20, deadline=None)
-     def test_cumsum(
-@@ -106,7 +114,10 @@ class CumSumTest(unittest.TestCase):
-                 (torch.float32, np.float32),
-             ]
-         ),
--        device=cpu_and_maybe_gpu(),
-+        device=st.one_of(
-+            cpu_and_maybe_gpu(),
-+            st.sampled_from([torch.device("xpu")] if xpu_available else []),
-+        ),
-     )
-     @settings(verbosity=Verbosity.verbose, max_examples=20, deadline=None)
-     def test_asynchronous_complete_cumsum_2d(
 @@ -141,6 +152,7 @@ class CumSumTest(unittest.TestCase):
              zc.cpu(),
          )
@@ -169,5 +134,28 @@ index 79aad1b..120ebc5 100644
      @given(
          batch_size=st.integers(10, 1000),
          max_len=st.integers(10, 1000),
+diff --git a/fbgemm_gpu/test/test_utils.py b/fbgemm_gpu/test/test_utils.py
+index 5e0d1a2..a3c8b1f 100644
+--- a/fbgemm_gpu/test/test_utils.py
++++ b/fbgemm_gpu/test/test_utils.py
+@@ -121,6 +121,7 @@ on_arm_platform: tuple[bool, str] = (
+ 
+ def cpu_and_maybe_gpu() -> st.SearchStrategy[list[torch.device]]:
+     gpu_available = torch.cuda.is_available() and torch.cuda.device_count() > 0
++    xpu_available = torch.xpu.is_available() and torch.xpu.device_count() > 0
+     # st.sampled_from is not guaranteed to test all the values passed to it.
+     # However, Hypothesis, by default, generates 100 test cases from the specified strategies.
+     # If st.sampled_from contains >100 items or if it's used in conjunction with other strategies
+@@ -129,7 +130,9 @@ def cpu_and_maybe_gpu() -> st.SearchStrategy[list[torch.device]]:
+     # lint-fixme: TorchDeviceCuda, TorchFunctionCallCudaDevice
+     # CUDA specifically required: GPU device strategy for FBGEMM tests
+     gpu_devices = [torch.device("cuda")] if gpu_available else []
+-    return st.sampled_from([torch.device("cpu")] + gpu_devices)
++    xpu_devices = [torch.device("xpu")] if xpu_available else []
++    return st.sampled_from([torch.device("cpu")] + gpu_devices + xpu_devices)
++
+ 
+ 
+ class optests:
 -- 
 2.43.0

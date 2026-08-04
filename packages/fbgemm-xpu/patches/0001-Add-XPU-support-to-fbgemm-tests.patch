@@ -12,9 +12,9 @@ Signed-off-by: Alberto Gallegos <alberto.gallegos.muro@intel.com>
 ---
  fbgemm_gpu/test/sparse/misc_ops_test.py            | 18 ++++++++++++++----
  .../test/sparse/permute_sparse_features_test.py    |  9 +++++++--
- fbgemm_gpu/test/sparse/cumsum_test.py              | 19 ++++++++++++++++---
+ fbgemm_gpu/test/sparse/cumsum_test.py              |  4 ++++
  fbgemm_gpu/test/test_utils.py                      |  5 ++++-
- 4 files changed, 41 insertions(+), 10 deletions()
+ 4 files changed, 26 insertions(+), 6 deletions(-)
 
 diff --git a/fbgemm_gpu/test/sparse/misc_ops_test.py b/fbgemm_gpu/test/sparse/misc_ops_test.py
 index edb0d36..f825ce2 100644
@@ -126,7 +126,17 @@ diff --git a/fbgemm_gpu/test/sparse/cumsum_test.py b/fbgemm_gpu/test/sparse/cums
 index 79aad1b..120ebc5 100644
 --- a/fbgemm_gpu/test/sparse/cumsum_test.py
 +++ b/fbgemm_gpu/test/sparse/cumsum_test.py
-@@ -141,6 +152,7 @@ class CumSumTest(unittest.TestCase):
+@@ -29,6 +29,9 @@ else:
+         optests,
+     )
+ 
++# Registers the XPU (Intel GPU) FBGEMM operator implementations.
++import fbgemm_xpu  # noqa: F401, E402
++
+ 
+ class CumSumTest(unittest.TestCase):
+     @given(
+@@ -141,6 +144,7 @@ class CumSumTest(unittest.TestCase):
              zc.cpu(),
          )
  

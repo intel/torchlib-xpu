@@ -1,4 +1,4 @@
-# Intel XPU Plugin for FBGEMM
+# Intel XPU Plugin for FBGEMM 
 
 ## Overview
 

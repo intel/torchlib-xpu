@@ -184,12 +184,12 @@ jobs:
   identify-changes:
     runs-on: ubuntu-24.04
     outputs:
-      torchcodec-xpu: ${{ (github.event_name == 'release' ||
-                             contains(github.event.pull_request.labels.*.name, 'test-all')) && 'true' ||
-                          steps.changes.outputs.torchcodec-xpu }}
-      fbgemm-xpu: ${{ (github.event_name == 'release' ||
-                         contains(github.event.pull_request.labels.*.name, 'test-all')) && 'true' ||
-                      steps.changes.outputs.fbgemm-xpu }}
+      torchcodec-xpu: ${{ case(github.event_name == 'release', 'true',
+                            github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'test-all'), 'true',
+                            steps.changes.outputs.torchcodec-xpu || 'false') }}
+      fbgemm-xpu: ${{ case(github.event_name == 'release', 'true',
+                        github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'test-all'), 'true',
+                        steps.changes.outputs.fbgemm-xpu || 'false') }}
     steps:
       - name: 'Checkout'
         if: github.event_name != 'release'
@@ -219,7 +219,7 @@ jobs:
         # Testing in minimum and maximum supported versions of python.
         python-version: [ '3.10', '3.11', '3.12', '3.13', '3.14' ]
         # TODO: re-enable dg2 runner after https://github.com/intel/torchlib-xpu/issues/94
-        runner: [ 'bmg' ]
+        runner: [ 'bmg', 'dg2' ]
         # Default fallback value for standard matrix combinations
         cpu_fallback: [ false ]  # fallback not allowed
         force_cpu_fallback: [ false ]

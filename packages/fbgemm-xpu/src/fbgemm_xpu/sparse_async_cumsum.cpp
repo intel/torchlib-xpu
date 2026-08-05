@@ -7,6 +7,14 @@
 #include "sparse_async_cumsum.h"
 
 namespace fbgemm_xpu {
+// TODO: Implement cumulative sum operators as native SYCL kernel for better performance.
+// Currently using PyTorch's cumulative sum for testing purposes.
+// CCCL's DeviceScan::ExclusiveSum uses a sophisticated
+// tile-based "decoupled look-back" algorithm (see: https://research.nvidia.com/publication/single-pass-parallel-prefix-scan-decoupled-look-back)
+// Porting this to SYCL would require:
+// 1. Understanding the tile-state coordination mechanism used by CCCL's lookback/lookahead algorithms
+// 2. Profiling to validate the implementation meets or exceeds PyTorch performance
+// This optimization is deferred until cumulative sum becomes a measured bottleneck in DLRM workloads.
 
 // ============================================================================
 // Host Functions - XPU Implementation

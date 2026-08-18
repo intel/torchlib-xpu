@@ -1,4 +1,4 @@
-From 1ff5ad5b0c0a780081a8d6f90748c9c9df08e26d Mon Sep 17 00:00:00 2001
+From bf7ce986696ef514d59774ed2304264b55b01432 Mon Sep 17 00:00:00 2001
 From: Alberto Gallegos <alberto.gallegos.muro@intel.com>
 Date: Thu, 9 Jul 2026 18:28:28 +0000
 Subject: [PATCH] Add XPU support to FBGEMM sparse ops tests
@@ -8,16 +8,46 @@ Includes support for permute_1D_sparse_data and permute_2D_sparse_data operators
 Also adds XPU support to cumsum_test.py for asynchronous_complete_cumsum,
 asynchronous_exclusive_cumsum, and asynchronous_inclusive_cumsum operators.
 
+Add focused XPU correctness tests for get_infos_metadata in
+split_embeddings_utils_test.py and generate_vbe_metadata_test.py (import
+fbgemm_xpu to register the XPU impl and compare the XPU dispatch result
+against the CPU impl). The surrounding transpose/vbe-kernel/bounds-check
+cases stay GPU-only because those operators are not yet ported to XPU.
+
 Signed-off-by: Alberto Gallegos <alberto.gallegos.muro@intel.com>
 ---
- fbgemm_gpu/test/sparse/misc_ops_test.py                | 18 +++++++++++++++---
- fbgemm_gpu/test/sparse/permute_sparse_features_test.py | 19 +++++++++++++++----
- fbgemm_gpu/test/sparse/cumsum_test.py                  |  4 ++++
- fbgemm_gpu/test/test_utils.py                          | 18 +++++++++++++++++-
- 4 files changed, 51 insertions(+), 8 deletions(-)
+ fbgemm_gpu/test/sparse/cumsum_test.py         |  4 +++
+ fbgemm_gpu/test/sparse/misc_ops_test.py       | 18 ++++++++++---
+ .../sparse/permute_sparse_features_test.py    | 19 +++++++++++---
+ .../tbe/utils/generate_vbe_metadata_test.py   | 17 +++++++++++--
+ .../tbe/utils/split_embeddings_utils_test.py  | 25 +++++++++++++++++--
+ fbgemm_gpu/test/test_utils.py                 | 18 ++++++++++++-
+ 6 files changed, 89 insertions(+), 12 deletions(-)
 
+diff --git a/fbgemm_gpu/test/sparse/cumsum_test.py b/fbgemm_gpu/test/sparse/cumsum_test.py
+index 79aad1b..e8389ae 100644
+--- a/fbgemm_gpu/test/sparse/cumsum_test.py
++++ b/fbgemm_gpu/test/sparse/cumsum_test.py
+@@ -29,6 +29,9 @@ else:
+         optests,
+     )
+ 
++# Registers the XPU (Intel GPU) FBGEMM operator implementations.
++import fbgemm_xpu  # noqa: F401, E402
++
+ 
+ class CumSumTest(unittest.TestCase):
+     @given(
+@@ -141,6 +144,7 @@ class CumSumTest(unittest.TestCase):
+             zc.cpu(),
+         )
+ 
++    @unittest.skip("Operator not implemented on XPU")
+     @given(
+         batch_size=st.integers(10, 1000),
+         max_len=st.integers(10, 1000),
 diff --git a/fbgemm_gpu/test/sparse/misc_ops_test.py b/fbgemm_gpu/test/sparse/misc_ops_test.py
-index edb0d3615..f825ce27c 100644
+index edb0d36..f825ce2 100644
 --- a/fbgemm_gpu/test/sparse/misc_ops_test.py
 +++ b/fbgemm_gpu/test/sparse/misc_ops_test.py
 @@ -33,6 +33,11 @@ else:
@@ -95,9 +125,8 @@ index edb0d3615..f825ce27c 100644
      def test_lengths_range(self) -> None:
          # When 'output_shape' is None, the function will return a tensor with dynamic shape.
          with self.assertRaisesRegex(
-
 diff --git a/fbgemm_gpu/test/sparse/permute_sparse_features_test.py b/fbgemm_gpu/test/sparse/permute_sparse_features_test.py
-index d358f4b8f..3e0b2c184 100644
+index d358f4b..3e0b2c1 100644
 --- a/fbgemm_gpu/test/sparse/permute_sparse_features_test.py
 +++ b/fbgemm_gpu/test/sparse/permute_sparse_features_test.py
 @@ -19,16 +19,28 @@ from hypothesis import given, settings
@@ -149,32 +178,102 @@ index d358f4b8f..3e0b2c184 100644
      def test_permute_2D_sparse_data(self) -> None:
          lengths = torch.tensor(
              [[0, 0, 1], [0, 1, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 1]],
-
-diff --git a/fbgemm_gpu/test/sparse/cumsum_test.py b/fbgemm_gpu/test/sparse/cumsum_test.py
-index 79aad1b55..e8389aef3 100644
---- a/fbgemm_gpu/test/sparse/cumsum_test.py
-+++ b/fbgemm_gpu/test/sparse/cumsum_test.py
-@@ -29,6 +29,9 @@ else:
-         optests,
-     )
+diff --git a/fbgemm_gpu/test/tbe/utils/generate_vbe_metadata_test.py b/fbgemm_gpu/test/tbe/utils/generate_vbe_metadata_test.py
+index 08ca3ea..69aef4c 100755
+--- a/fbgemm_gpu/test/tbe/utils/generate_vbe_metadata_test.py
++++ b/fbgemm_gpu/test/tbe/utils/generate_vbe_metadata_test.py
+@@ -11,6 +11,7 @@ import unittest
+ from itertools import accumulate
  
-+# Registers the XPU (Intel GPU) FBGEMM operator implementations.
-+import fbgemm_xpu  # noqa: F401, E402
+ import torch
++import fbgemm_xpu  # noqa: F401  -- registers fbgemm XPU operator impls
+ from fbgemm_gpu.split_table_batched_embeddings_ops_common import PoolingMode
+ from fbgemm_gpu.split_table_batched_embeddings_ops_training_common import (
+     generate_vbe_metadata,
+@@ -20,9 +21,9 @@ from ..common import open_source
+ 
+ if open_source:
+     # pyre-ignore[21]
+-    from test_utils import gpu_unavailable
++    from test_utils import gpu_unavailable, xpu_unavailable
+ else:
+-    from fbgemm_gpu.test.test_utils import gpu_unavailable
++    from fbgemm_gpu.test.test_utils import gpu_unavailable, xpu_unavailable
+ 
+ 
+ class GenerateVBEMetadataTest(unittest.TestCase):
+@@ -151,6 +152,18 @@ class GenerateVBEMetadataTest(unittest.TestCase):
+         assert torch.equal(row_output_offsets.cpu(), row_output_offsets_cpu)
+         assert torch.equal(b_t_map.cpu(), b_t_map_cpu)
+ 
++    @unittest.skipIf(*xpu_unavailable)
++    def test_get_infos_metadata_xpu(self) -> None:
++        # get_infos_metadata is device-agnostic integer bit-math; the tensor
++        # argument is unused and only anchors dispatch. Verify the XPU key
++        # returns identical (info_B_num_bits, info_B_mask) as the CPU impl.
++        for B, T in [(1, 1), (32, 20), (128, 64), (100, 100)]:
++            xpu_res = torch.ops.fbgemm.get_infos_metadata(
++                torch.empty(0, device="xpu"), B, T
++            )
++            cpu_res = torch.ops.fbgemm.get_infos_metadata(torch.empty(0), B, T)
++            self.assertEqual(tuple(xpu_res), tuple(cpu_res))
 +
+     @unittest.skipIf(*gpu_unavailable)
+     def test_generate_vbe_metadata_kernel(self):
+         self.execute_generate_vbe_metadata_kernel(
+diff --git a/fbgemm_gpu/test/tbe/utils/split_embeddings_utils_test.py b/fbgemm_gpu/test/tbe/utils/split_embeddings_utils_test.py
+index 5186ea1..c6d3ed0 100644
+--- a/fbgemm_gpu/test/tbe/utils/split_embeddings_utils_test.py
++++ b/fbgemm_gpu/test/tbe/utils/split_embeddings_utils_test.py
+@@ -16,6 +16,7 @@ import unittest
+ from itertools import accumulate
  
- class CumSumTest(unittest.TestCase):
-     @given(
-@@ -141,6 +144,7 @@ class CumSumTest(unittest.TestCase):
-             zc.cpu(),
-         )
+ import fbgemm_gpu  # noqa E402
++import fbgemm_xpu  # noqa: F401, E402  -- registers fbgemm XPU operator impls
+ import hypothesis.strategies as st
+ import numpy as np
+ import torch
+@@ -31,9 +32,13 @@ from ..common import MAX_EXAMPLES, open_source
  
-+    @unittest.skip("Operator not implemented on XPU")
-     @given(
-         batch_size=st.integers(10, 1000),
-         max_len=st.integers(10, 1000),
-
+ if open_source:
+     # pyre-ignore[21]
+-    from test_utils import gpu_unavailable, use_cpu_strategy
++    from test_utils import gpu_unavailable, use_cpu_strategy, xpu_unavailable
+ else:
+-    from fbgemm_gpu.test.test_utils import gpu_unavailable, use_cpu_strategy
++    from fbgemm_gpu.test.test_utils import (
++        gpu_unavailable,
++        use_cpu_strategy,
++        xpu_unavailable,
++    )
+ 
+ from fbgemm_gpu.split_table_batched_embeddings_ops_training_common import (
+     generate_vbe_metadata,
+@@ -615,6 +620,22 @@ class SplitEmbeddingsUtilsTest(unittest.TestCase):
+                 )
+             torch.testing.assert_close(dense_indices.clone().fill_(-1), dense_indices_)
+ 
++    @unittest.skipIf(*xpu_unavailable)
++    @given(
++        B=st.integers(min_value=1, max_value=128),
++        T=st.integers(min_value=1, max_value=128),
++    )
++    @settings(verbosity=VERBOSITY, max_examples=MAX_EXAMPLES, deadline=None)
++    def test_get_infos_metadata_xpu(self, B: int, T: int) -> None:
++        # get_infos_metadata is device-agnostic integer bit-math; the tensor
++        # argument is unused and only anchors dispatch. Verify the XPU key
++        # returns identical (info_B_num_bits, info_B_mask) as the CPU impl.
++        xpu_res = torch.ops.fbgemm.get_infos_metadata(
++            torch.empty(0, device="xpu"), B, T
++        )
++        cpu_res = torch.ops.fbgemm.get_infos_metadata(torch.empty(0), B, T)
++        self.assertEqual(tuple(xpu_res), tuple(cpu_res))
++
+     def test_pickle(self) -> None:
+         # pyre-ignore[16]
+         tensor_queue = torch.classes.fbgemm.TensorQueue(torch.empty(0))
 diff --git a/fbgemm_gpu/test/test_utils.py b/fbgemm_gpu/test/test_utils.py
-index 260e11ef0..c1d456236 100644
+index 260e11e..c1d4562 100644
 --- a/fbgemm_gpu/test/test_utils.py
 +++ b/fbgemm_gpu/test/test_utils.py
 @@ -66,6 +66,20 @@ gpu_unavailable: tuple[bool, str] = (
@@ -216,6 +315,6 @@ index 260e11ef0..c1d456236 100644
  
  
  class optests:
-
 -- 
 2.43.0
+

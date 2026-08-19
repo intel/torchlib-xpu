@@ -1,23 +1,92 @@
-From 1ff5ad5b0c0a780081a8d6f90748c9c9df08e26d Mon Sep 17 00:00:00 2001
+From f65369303b45f53b2049d6370ecb381949e379e8 Mon Sep 17 00:00:00 2001
 From: Alberto Gallegos <alberto.gallegos.muro@intel.com>
-Date: Thu, 9 Jul 2026 18:28:28 +0000
+Date: Wed, 19 Aug 2026 18:19:12 +0000
 Subject: [PATCH] Add XPU support to FBGEMM sparse ops tests
 
-Add XPU device support to misc_ops_test.py and permute_sparse_features_test.py.
-Includes support for permute_1D_sparse_data and permute_2D_sparse_data operators.
-Also adds XPU support to cumsum_test.py for asynchronous_complete_cumsum,
-asynchronous_exclusive_cumsum, and asynchronous_inclusive_cumsum operators.
+Add XPU device support to existing sparse operator tests and enable expand_into_jagged_permute_test.py on XPU.
 
 Signed-off-by: Alberto Gallegos <alberto.gallegos.muro@intel.com>
 ---
- fbgemm_gpu/test/sparse/misc_ops_test.py                | 18 +++++++++++++++---
- fbgemm_gpu/test/sparse/permute_sparse_features_test.py | 19 +++++++++++++++----
- fbgemm_gpu/test/sparse/cumsum_test.py                  |  4 ++++
- fbgemm_gpu/test/test_utils.py                          | 18 +++++++++++++++++-
- 4 files changed, 51 insertions(+), 8 deletions(-)
+ .../jagged/expand_into_jagged_permute_test.py | 17 +++++++++++++++++
+ fbgemm_gpu/test/sparse/cumsum_test.py         |  4 ++++
+ fbgemm_gpu/test/sparse/misc_ops_test.py       | 18 +++++++++++++++---
+ .../sparse/permute_sparse_features_test.py    | 19 +++++++++++++++----
+ fbgemm_gpu/test/test_utils.py                 | 18 +++++++++++++++++-
+ 5 files changed, 68 insertions(+), 8 deletions(-)
 
+diff --git a/fbgemm_gpu/test/jagged/expand_into_jagged_permute_test.py b/fbgemm_gpu/test/jagged/expand_into_jagged_permute_test.py
+index e3eb1b5..1c15260 100644
+--- a/fbgemm_gpu/test/jagged/expand_into_jagged_permute_test.py
++++ b/fbgemm_gpu/test/jagged/expand_into_jagged_permute_test.py
+@@ -19,6 +19,9 @@ from hypothesis import given, settings, Verbosity
+ 
+ from .common import additional_decorators, open_source
+ 
++# Registers the XPU (Intel GPU) FBGEMM operator implementations.
++import fbgemm_xpu  # noqa: F401, E402
++
+ if open_source:
+     # pyre-ignore[21]
+     from test_utils import (
+@@ -27,6 +30,7 @@ if open_source:
+         gpu_unavailable,
+         on_oss_clang,
+         optests,
++        xpu_available,
+     )
+ else:
+     from fbgemm_gpu.test.test_utils import (
+@@ -35,6 +39,7 @@ else:
+         gpu_unavailable,
+         on_oss_clang,
+         optests,
++        xpu_available,
+     )
+ 
+ 
+@@ -111,6 +116,18 @@ class ExpandIntoJaggedPermuteTest(unittest.TestCase):
+                 output_permute_gpu.cpu(), output_permute_ref_tensor
+             )
+ 
++        if xpu_available:
++            # xpu op
++            output_permute_xpu = torch.ops.fbgemm.expand_into_jagged_permute(
++                permute_tensor.xpu(),
++                offsets_1d_tensor.xpu(),
++                permuted_offsets_1d_tensor.xpu(),
++                offsets_1d[-1],
++            )
++            torch.testing.assert_close(
++                output_permute_xpu.cpu(), output_permute_ref_tensor
++            )
++
+     @unittest.skipIf(*gpu_unavailable)
+     # Skip on GPUs with insufficient HBM. Inputs are int32 of size
+     # ~permute_size, totaling ~1.5 GiB at the chosen permute_size.
+diff --git a/fbgemm_gpu/test/sparse/cumsum_test.py b/fbgemm_gpu/test/sparse/cumsum_test.py
+index 79aad1b..e8389ae 100644
+--- a/fbgemm_gpu/test/sparse/cumsum_test.py
++++ b/fbgemm_gpu/test/sparse/cumsum_test.py
+@@ -29,6 +29,9 @@ else:
+         optests,
+     )
+ 
++# Registers the XPU (Intel GPU) FBGEMM operator implementations.
++import fbgemm_xpu  # noqa: F401, E402
++
+ 
+ class CumSumTest(unittest.TestCase):
+     @given(
+@@ -141,6 +144,7 @@ class CumSumTest(unittest.TestCase):
+             zc.cpu(),
+         )
+ 
++    @unittest.skip("Operator not implemented on XPU")
+     @given(
+         batch_size=st.integers(10, 1000),
+         max_len=st.integers(10, 1000),
 diff --git a/fbgemm_gpu/test/sparse/misc_ops_test.py b/fbgemm_gpu/test/sparse/misc_ops_test.py
-index edb0d3615..f825ce27c 100644
+index edb0d36..f825ce2 100644
 --- a/fbgemm_gpu/test/sparse/misc_ops_test.py
 +++ b/fbgemm_gpu/test/sparse/misc_ops_test.py
 @@ -33,6 +33,11 @@ else:
@@ -95,9 +164,8 @@ index edb0d3615..f825ce27c 100644
      def test_lengths_range(self) -> None:
          # When 'output_shape' is None, the function will return a tensor with dynamic shape.
          with self.assertRaisesRegex(
-
 diff --git a/fbgemm_gpu/test/sparse/permute_sparse_features_test.py b/fbgemm_gpu/test/sparse/permute_sparse_features_test.py
-index d358f4b8f..3e0b2c184 100644
+index d358f4b..3e0b2c1 100644
 --- a/fbgemm_gpu/test/sparse/permute_sparse_features_test.py
 +++ b/fbgemm_gpu/test/sparse/permute_sparse_features_test.py
 @@ -19,16 +19,28 @@ from hypothesis import given, settings
@@ -149,32 +217,8 @@ index d358f4b8f..3e0b2c184 100644
      def test_permute_2D_sparse_data(self) -> None:
          lengths = torch.tensor(
              [[0, 0, 1], [0, 1, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 1]],
-
-diff --git a/fbgemm_gpu/test/sparse/cumsum_test.py b/fbgemm_gpu/test/sparse/cumsum_test.py
-index 79aad1b55..e8389aef3 100644
---- a/fbgemm_gpu/test/sparse/cumsum_test.py
-+++ b/fbgemm_gpu/test/sparse/cumsum_test.py
-@@ -29,6 +29,9 @@ else:
-         optests,
-     )
- 
-+# Registers the XPU (Intel GPU) FBGEMM operator implementations.
-+import fbgemm_xpu  # noqa: F401, E402
-+
- 
- class CumSumTest(unittest.TestCase):
-     @given(
-@@ -141,6 +144,7 @@ class CumSumTest(unittest.TestCase):
-             zc.cpu(),
-         )
- 
-+    @unittest.skip("Operator not implemented on XPU")
-     @given(
-         batch_size=st.integers(10, 1000),
-         max_len=st.integers(10, 1000),
-
 diff --git a/fbgemm_gpu/test/test_utils.py b/fbgemm_gpu/test/test_utils.py
-index 260e11ef0..c1d456236 100644
+index 260e11e..c1d4562 100644
 --- a/fbgemm_gpu/test/test_utils.py
 +++ b/fbgemm_gpu/test/test_utils.py
 @@ -66,6 +66,20 @@ gpu_unavailable: tuple[bool, str] = (
@@ -216,6 +260,6 @@ index 260e11ef0..c1d456236 100644
  
  
  class optests:
-
 -- 
 2.43.0
+

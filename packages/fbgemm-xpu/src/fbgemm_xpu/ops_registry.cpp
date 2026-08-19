@@ -97,4 +97,15 @@ TORCH_LIBRARY_FRAGMENT(fbgemm, m)
             ") -> (Tensor, Tensor, Tensor?)"
         );
     }
+
+    if (!utils::torch::schemaExists("fbgemm::expand_into_jagged_permute")) {
+        m.def(
+            "expand_into_jagged_permute("
+            "    Tensor permute, "
+            "    Tensor input_offsets, "
+            "    Tensor output_offsets, "
+            "    SymInt output_size"
+            ") -> Tensor"
+        );
+    }
 }

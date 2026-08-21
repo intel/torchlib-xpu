@@ -2,7 +2,7 @@
 
 ## Overview
 
-[TorchCodec] is a high-performance Python library designed for media processing (decoding and encoding) using PyTorch* tensors. Intel® XPU plugin for [TorchCodec] enables hardware acceleration for video operations (only decoding at the moment) on Linux. Both [TorchCodec] and Intel® plugin rely on the FFmpeg libraries for their operations which must be pre-installed on the system. Intel® plugin further assumes that FFmpeg is built with the VAAPI support.
+[TorchCodec] is a high-performance Python library designed for media processing (decoding and encoding) using PyTorch* tensors. Intel® XPU plugin for [TorchCodec] enables hardware acceleration for video operations on Linux. Both [TorchCodec] and Intel® plugin rely on the FFmpeg libraries for their operations which must be pre-installed on the system. Intel® plugin further assumes that FFmpeg is built with the VAAPI support.
 
 [TorchCodec] will automatically load Intel® XPU plugin if it is installed on the system via Python packages entry point mechanism. After importing TorchCodec, pass XPU device to initialize [TorchCodec] decoder or encoder:
 
@@ -17,6 +17,10 @@ decoder = torchcodec.decoders.VideoDecoder(
 
 All the Intel GPU hardware enabled for XPU PyTorch backend with hardware media decoding capabilities is supported.
 
+## Supported FFmpeg versions
+
+Intel Plugin for TorchCodec is being validated with FFmpeg versions range [6, 9].
+
 ## Installation
 
 Pre-built release wheels are available at [PyPI](https://pypi.org/project/torchcodec-xpu). Installation requires PyTorch with enabled XPU support which can be fetched from https://download.pytorch.org/whl/xpu:
@@ -25,6 +29,8 @@ Pre-built release wheels are available at [PyPI](https://pypi.org/project/torchc
 pip install torchcodec-xpu \
   --extra-index-url https://download.pytorch.org/whl/xpu
 ```
+
+FFmpeg with enabled VAAPI backend must be installed on the system separately. Pre-built wheels support FFmpeg versions range [6, 9].
 
 ## Environment variables
 
@@ -41,7 +47,7 @@ The following environment variables can be used to customize the behavior of Int
 ## Known limitations
 
 * [Intel® Data Center GPU Max Series][PVC] (Ponte Vecchio, PVC) GPUs are not supported due to missing hardware media engines. Execution will fallback to CPU.
-* SYCL color space conversion kernel is not supported on [Intel® Arc™ Pro A-Series Graphics][DG2] (Alchemist, DG2) and [Intel® Data Center GPU Flex Series][ATS-M] (Archtic Sound, ATS-M) GPUs as 64-bit floating point operations used in the kernel are not available on these GPUs. Execution will fallback to less performant color space conversion on media engines via FFmpeg VAAPI.
+* SYCL color space conversion kernel is not supported on [Intel® Arc™ Pro A-Series Graphics][DG2] (Alchemist, DG2) and [Intel® Data Center GPU Flex Series][ATS-M] (Archtic Sound, ATS-M) GPUs as 64-bit floating point operations used in the kernel are not available on these GPUs. Execution will fallback to less performant color space conversion on CPU or on media engines via FFmpeg VAAPI.
 
 
 [TorchCodec]: https://github.com/meta-pytorch/torchcodec

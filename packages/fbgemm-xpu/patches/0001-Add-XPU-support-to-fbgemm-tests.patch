@@ -1,24 +1,29 @@
-From f65369303b45f53b2049d6370ecb381949e379e8 Mon Sep 17 00:00:00 2001
+From 8564a6b9198441587ad39dcef00a5e353dd64edd Mon Sep 17 00:00:00 2001
 From: Alberto Gallegos <alberto.gallegos.muro@intel.com>
 Date: Wed, 19 Aug 2026 18:19:12 +0000
 Subject: [PATCH] Add XPU support to FBGEMM sparse ops tests
 
-Add XPU device support to existing sparse operator tests and enable expand_into_jagged_permute_test.py on XPU.
+Add XPU device support to misc_ops_test.py, permute_sparse_features_test.py,
+and cumsum_test.py.
+
+Enable expand_into_jagged_permute_test.py on the current accelerator using the
+shared accelerator_available/current_accelerator helpers and device-agnostic
+tensor transfers.
 
 Signed-off-by: Alberto Gallegos <alberto.gallegos.muro@intel.com>
 ---
- .../jagged/expand_into_jagged_permute_test.py | 17 +++++++++++++++++
- fbgemm_gpu/test/sparse/cumsum_test.py         |  4 ++++
- fbgemm_gpu/test/sparse/misc_ops_test.py       | 18 +++++++++++++++---
- .../sparse/permute_sparse_features_test.py    | 19 +++++++++++++++----
- fbgemm_gpu/test/test_utils.py                 | 18 +++++++++++++++++-
- 5 files changed, 68 insertions(+), 8 deletions(-)
+ .../jagged/expand_into_jagged_permute_test.py | 29 ++++++++++++-------
+ fbgemm_gpu/test/sparse/cumsum_test.py         |  4 +++
+ fbgemm_gpu/test/sparse/misc_ops_test.py       | 18 ++++++++++--
+ .../sparse/permute_sparse_features_test.py    | 19 +++++++++---
+ fbgemm_gpu/test/test_utils.py                 | 26 ++++++++++++++++-
+ 5 files changed, 77 insertions(+), 19 deletions(-)
 
 diff --git a/fbgemm_gpu/test/jagged/expand_into_jagged_permute_test.py b/fbgemm_gpu/test/jagged/expand_into_jagged_permute_test.py
-index e3eb1b5..1c15260 100644
+index e3eb1b52c..2259a6b18 100644
 --- a/fbgemm_gpu/test/jagged/expand_into_jagged_permute_test.py
 +++ b/fbgemm_gpu/test/jagged/expand_into_jagged_permute_test.py
-@@ -19,6 +19,9 @@ from hypothesis import given, settings, Verbosity
+@@ -19,10 +19,14 @@ from hypothesis import given, settings, Verbosity
  
  from .common import additional_decorators, open_source
  
@@ -28,43 +33,54 @@ index e3eb1b5..1c15260 100644
  if open_source:
      # pyre-ignore[21]
      from test_utils import (
-@@ -27,6 +30,7 @@ if open_source:
+-        gpu_available,
++        accelerator_available,
++        current_accelerator,
+         gpu_memory_lt_gb,
          gpu_unavailable,
          on_oss_clang,
-         optests,
-+        xpu_available,
+@@ -30,7 +34,8 @@ if open_source:
      )
  else:
      from fbgemm_gpu.test.test_utils import (
-@@ -35,6 +39,7 @@ else:
+-        gpu_available,
++        accelerator_available,
++        current_accelerator,
+         gpu_memory_lt_gb,
          gpu_unavailable,
          on_oss_clang,
-         optests,
-+        xpu_available,
-     )
+@@ -97,18 +102,20 @@ class ExpandIntoJaggedPermuteTest(unittest.TestCase):
+         )
+         output_permute_ref_tensor = torch.tensor(output_permute_ref)
  
- 
-@@ -111,6 +116,18 @@ class ExpandIntoJaggedPermuteTest(unittest.TestCase):
-                 output_permute_gpu.cpu(), output_permute_ref_tensor
+-        # assert cpu and gpu ops
++        # Assert CPU and current-accelerator results.
+         torch.testing.assert_close(output_permute_cpu, output_permute_ref_tensor)
+-        if gpu_available:
+-            # gpu op
+-            output_permute_gpu = torch.ops.fbgemm.expand_into_jagged_permute(
+-                permute_tensor.cuda(),
+-                offsets_1d_tensor.cuda(),
+-                permuted_offsets_1d_tensor.cuda(),
+-                offsets_1d[-1],
++        if accelerator_available:
++            device = current_accelerator()
++            output_permute_accelerator = (
++                torch.ops.fbgemm.expand_into_jagged_permute(
++                    permute_tensor.to(device),
++                    offsets_1d_tensor.to(device),
++                    permuted_offsets_1d_tensor.to(device),
++                    offsets_1d[-1],
++                )
+             )
+             torch.testing.assert_close(
+-                output_permute_gpu.cpu(), output_permute_ref_tensor
++                output_permute_accelerator.cpu(), output_permute_ref_tensor
              )
  
-+        if xpu_available:
-+            # xpu op
-+            output_permute_xpu = torch.ops.fbgemm.expand_into_jagged_permute(
-+                permute_tensor.xpu(),
-+                offsets_1d_tensor.xpu(),
-+                permuted_offsets_1d_tensor.xpu(),
-+                offsets_1d[-1],
-+            )
-+            torch.testing.assert_close(
-+                output_permute_xpu.cpu(), output_permute_ref_tensor
-+            )
-+
      @unittest.skipIf(*gpu_unavailable)
-     # Skip on GPUs with insufficient HBM. Inputs are int32 of size
-     # ~permute_size, totaling ~1.5 GiB at the chosen permute_size.
 diff --git a/fbgemm_gpu/test/sparse/cumsum_test.py b/fbgemm_gpu/test/sparse/cumsum_test.py
-index 79aad1b..e8389ae 100644
+index 79aad1b55..e8389aef3 100644
 --- a/fbgemm_gpu/test/sparse/cumsum_test.py
 +++ b/fbgemm_gpu/test/sparse/cumsum_test.py
 @@ -29,6 +29,9 @@ else:
@@ -86,7 +102,7 @@ index 79aad1b..e8389ae 100644
          batch_size=st.integers(10, 1000),
          max_len=st.integers(10, 1000),
 diff --git a/fbgemm_gpu/test/sparse/misc_ops_test.py b/fbgemm_gpu/test/sparse/misc_ops_test.py
-index edb0d36..f825ce2 100644
+index edb0d3615..f825ce27c 100644
 --- a/fbgemm_gpu/test/sparse/misc_ops_test.py
 +++ b/fbgemm_gpu/test/sparse/misc_ops_test.py
 @@ -33,6 +33,11 @@ else:
@@ -165,7 +181,7 @@ index edb0d36..f825ce2 100644
          # When 'output_shape' is None, the function will return a tensor with dynamic shape.
          with self.assertRaisesRegex(
 diff --git a/fbgemm_gpu/test/sparse/permute_sparse_features_test.py b/fbgemm_gpu/test/sparse/permute_sparse_features_test.py
-index d358f4b..3e0b2c1 100644
+index d358f4b8f..3e0b2c184 100644
 --- a/fbgemm_gpu/test/sparse/permute_sparse_features_test.py
 +++ b/fbgemm_gpu/test/sparse/permute_sparse_features_test.py
 @@ -19,16 +19,28 @@ from hypothesis import given, settings
@@ -218,10 +234,10 @@ index d358f4b..3e0b2c1 100644
          lengths = torch.tensor(
              [[0, 0, 1], [0, 1, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 1]],
 diff --git a/fbgemm_gpu/test/test_utils.py b/fbgemm_gpu/test/test_utils.py
-index 260e11e..c1d4562 100644
+index 260e11ef0..ccb9fc881 100644
 --- a/fbgemm_gpu/test/test_utils.py
 +++ b/fbgemm_gpu/test/test_utils.py
-@@ -66,6 +66,20 @@ gpu_unavailable: tuple[bool, str] = (
+@@ -66,6 +66,28 @@ gpu_unavailable: tuple[bool, str] = (
  # Used for `if` statements inside tests
  gpu_available: bool = not gpu_unavailable[0]
  
@@ -233,16 +249,24 @@ index 260e11e..c1d4562 100644
 +# Used for `if` statements inside tests
 +xpu_available: bool = not xpu_unavailable[0]
 +
-+# Used for `@unittest.skipIf` when either GPU or XPU can run the test
++# Generic PyTorch accelerator (CUDA/XPU/...) probes, used for tests that only
++# need "some" accelerator rather than a hardcoded backend.
 +accelerator_unavailable: tuple[bool, str] = (
-+    gpu_unavailable[0] and xpu_unavailable[0],
-+    "GPU and XPU not found",
++    not torch.accelerator.is_available() or torch.accelerator.device_count() == 0,
++    "No PyTorch accelerator (CUDA/XPU/...) is available",
 +)
++# Used for `if` statements inside tests
++accelerator_available: bool = not accelerator_unavailable[0]
++
++
++def current_accelerator() -> torch.device | None:
++    """Return the currently active PyTorch accelerator device, or None."""
++    return torch.accelerator.current_accelerator() if accelerator_available else None
 +
  is_nvidia_device: bool = gpu_available and torch.version.cuda is not None
  
  # Used for `@unittest.skipIf` for tests that pass in internal CI, but fail on the GitHub runners
-@@ -128,6 +142,7 @@ on_arm_platform: tuple[bool, str] = (
+@@ -128,6 +150,7 @@ on_arm_platform: tuple[bool, str] = (
  
  def cpu_and_maybe_gpu() -> st.SearchStrategy[list[torch.device]]:
      gpu_available = torch.cuda.is_available() and torch.cuda.device_count() > 0
@@ -250,7 +274,7 @@ index 260e11e..c1d4562 100644
      # st.sampled_from is not guaranteed to test all the values passed to it.
      # However, Hypothesis, by default, generates 100 test cases from the specified strategies.
      # If st.sampled_from contains >100 items or if it's used in conjunction with other strategies
-@@ -136,7 +151,8 @@ def cpu_and_maybe_gpu() -> st.SearchStrategy[list[torch.device]]:
+@@ -136,7 +159,8 @@ def cpu_and_maybe_gpu() -> st.SearchStrategy[list[torch.device]]:
      # lint-fixme: TorchDeviceCuda, TorchFunctionCallCudaDevice
      # CUDA specifically required: GPU device strategy for FBGEMM tests
      gpu_devices = [torch.device("cuda")] if gpu_available else []

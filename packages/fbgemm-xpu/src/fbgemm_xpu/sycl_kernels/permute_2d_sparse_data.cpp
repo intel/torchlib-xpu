@@ -25,6 +25,9 @@
 //   permute_2D_sparse_data_xpu
 //     → permute_2D_sparse_data_cuda (CUDA)
 //
+//   permute_2D_sparse_preallocated_out_xpu
+//     → permute_2D_sparse_preallocated_out_cuda (CUDA)
+//
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "permute_2d_sparse_data.h"
@@ -114,12 +117,15 @@ void Permute2DDataKernel<has_weight, offsets_t, indices_t, weights_t>::operator(
 // ============================================================================
 
 std::tuple<at::Tensor, at::Tensor, std::optional<at::Tensor>>
-permute_2D_sparse_data_xpu(
+permute_2D_sparse_preallocated_out_xpu(
     const at::Tensor& permute,
     const at::Tensor& lengths,
     const at::Tensor& indices,
     const std::optional<at::Tensor>& weights,
-    const std::optional<int64_t>& permuted_lengths_sum) {
+    const std::optional<int64_t>& permuted_lengths_sum,
+    const std::optional<at::Tensor>& permuted_lengths_out,
+    const std::optional<at::Tensor>& permuted_indices_out,
+    const std::optional<at::Tensor>& permuted_weights_out) {
 
     // Device validation
     TORCH_INTERNAL_ASSERT(
@@ -158,7 +164,9 @@ permute_2D_sparse_data_xpu(
                                 : std::nullopt};
     }
 
-    at::Tensor permuted_lengths = at::empty({T, B}, lengths.options());
+    at::Tensor permuted_lengths = permuted_lengths_out.has_value()
+        ? permuted_lengths_out.value()
+        : at::empty({T, B}, lengths.options());
 
     sycl::queue& queue = c10::xpu::getCurrentXPUStream().queue();
 
@@ -212,8 +220,9 @@ permute_2D_sparse_data_xpu(
     // ------------------------------------------------------------------------
     // Phase 4: allocate outputs and permute data
     // ------------------------------------------------------------------------
-    at::Tensor permuted_indices =
-        at::empty(permuted_indices_size, indices.options());
+    at::Tensor permuted_indices = permuted_indices_out.has_value()
+        ? permuted_indices_out.value()
+        : at::empty(permuted_indices_size, indices.options());
     std::optional<at::Tensor> permuted_weights = std::nullopt;
 
     constexpr int32_t kThreadsPerSegment = 32;
@@ -233,12 +242,16 @@ permute_2D_sparse_data_xpu(
         int32_t weights_columns = 1;
         if (weights_value.dense_dim() > 1) {
             weights_columns = static_cast<int32_t>(weights_value.size(1));
-            permuted_weights = at::empty(
-                {permuted_indices_size, weights_columns},
-                weights_value.options());
+            permuted_weights = permuted_weights_out.has_value()
+                ? permuted_weights_out.value()
+                : at::empty(
+                      {permuted_indices_size, weights_columns},
+                      weights_value.options());
         } else {
-            permuted_weights = at::empty(
-                permuted_indices_size, weights_value.options());
+            permuted_weights = permuted_weights_out.has_value()
+                ? permuted_weights_out.value()
+                : at::empty(
+                      permuted_indices_size, weights_value.options());
         }
 
         AT_DISPATCH_INDEX_TYPES(
@@ -334,11 +347,40 @@ permute_2D_sparse_data_xpu(
     return {permuted_lengths, permuted_indices, permuted_weights};
 }
 
+// ============================================================================
+// Host Function - XPU Thin Wrapper
+// ============================================================================
+
+/**
+ * Functional (allocating) entry point. Delegates to the shared implementation
+ * with no pre-allocated output buffers.
+ */
+std::tuple<at::Tensor, at::Tensor, std::optional<at::Tensor>>
+permute_2D_sparse_data_xpu(
+    const at::Tensor& permute,
+    const at::Tensor& lengths,
+    const at::Tensor& indices,
+    const std::optional<at::Tensor>& weights,
+    const std::optional<int64_t>& permuted_lengths_sum) {
+    return permute_2D_sparse_preallocated_out_xpu(
+        permute,
+        lengths,
+        indices,
+        weights,
+        permuted_lengths_sum,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt);
+}
+
 /**
  * Register XPU implementation with PyTorch dispatch system.
  */
 TORCH_LIBRARY_IMPL(fbgemm, XPU, m) {
     m.impl("permute_2D_sparse_data", &permute_2D_sparse_data_xpu);
+    m.impl(
+        "permute_2D_sparse_preallocated_out",
+        &permute_2D_sparse_preallocated_out_xpu);
 }
 
 } // namespace fbgemm_xpu

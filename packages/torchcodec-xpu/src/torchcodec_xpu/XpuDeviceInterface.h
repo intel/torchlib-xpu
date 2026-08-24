@@ -20,19 +20,15 @@ class XpuDeviceInterface : public DeviceInterface {
 
   void initialize(const SharedAVCodecContext& codec_context) override;
 
-  void initialize_video(
+  void initialize_video_decoding(
       const AVStream* av_stream,
       const UniqueDecodingAVFormatContext& av_format_ctx,
-      const VideoStreamOptions& video_stream_options,
-      const std::vector<std::unique_ptr<Transform>>&
-          transforms,
-      const std::optional<FrameDims>& resized_output_dims)
-      override;
+      const VideoStreamOptions& video_stream_options) override;
 
   void register_hardware_device_with_codec(AVCodecContext* codec_context) override;
 
   void convert_av_frame_to_frame_output(
-      UniqueAVFrame& av_frame,
+      const AVFrame& av_frame,
       FrameOutput& frame_output,
       std::optional<torch::stable::Tensor> pre_allocated_output_tensor =
           std::nullopt) override;
@@ -71,11 +67,11 @@ class XpuDeviceInterface : public DeviceInterface {
   // Optimized conversion. Return value indicates if conversion was
   // successfull.
   bool convert_av_frame_to_frame_output_with_sycl(
-      UniqueAVFrame& av_frame,
+      const AVFrame& av_frame,
       torch::stable::Tensor& dst);
   // Fallback conversion if optimized path is not available.
   void convert_av_frame_to_frame_output_with_filter_graph(
-      UniqueAVFrame& av_frame,
+      const AVFrame& av_frame,
       torch::stable::Tensor& dst);
 
   // ---- Encoding helpers ----

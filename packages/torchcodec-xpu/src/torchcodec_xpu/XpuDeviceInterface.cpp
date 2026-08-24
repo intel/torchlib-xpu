@@ -282,12 +282,10 @@ void XpuDeviceInterface::initialize(const SharedAVCodecContext& codec_context) {
   }
 }
 
-void XpuDeviceInterface::initialize_video(
+void XpuDeviceInterface::initialize_video_decoding(
     const AVStream* av_stream,
     const UniqueDecodingAVFormatContext& av_format_ctx,
-    const VideoStreamOptions& video_stream_options,
-    [[maybe_unused]] const std::vector<std::unique_ptr<Transform>>& transforms,
-    [[maybe_unused]] const std::optional<FrameDims>& resized_output_dims) {
+    const VideoStreamOptions& video_stream_options) {
   TORCH_CHECK(av_stream != nullptr, "av_stream is null");
   time_base_ = av_stream->time_base;
   video_stream_options_ = video_stream_options;
@@ -298,7 +296,7 @@ void XpuDeviceInterface::initialize_video(
         av_stream,
         av_format_ctx,
         VideoStreamOptions(),
-        {},
+        /*transforms=*/{}, 
         /*resized_output_dims=*/std::nullopt);
   }
 }
@@ -434,10 +432,10 @@ VADisplay getVaDisplayFromAV(UniqueAVFrame& avFrame) {
 }
 
 void XpuDeviceInterface::convert_av_frame_to_frame_output(
-    UniqueAVFrame& av_frame,
+    const AVFrame& av_frame,
     FrameOutput& frame_output,
     std::optional<torch::stable::Tensor> pre_allocated_output_tensor) {
-  if (av_frame->format != AV_PIX_FMT_VAAPI) {
+  if (av_frame.format != AV_PIX_FMT_VAAPI) {
     // The frame's format is AV_PIX_FMT_VAAPI if and only if its content is on
     // the GPU. In this branch, the frame is on the CPU. This is what FFmpeg VAAPI
     // decoder gives us if it wasn't able to decode a frame, for whatever reason.
@@ -465,10 +463,10 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output(
   }
 
   TORCH_CHECK(
-      av_frame->format == AV_PIX_FMT_VAAPI,
+      av_frame.format == AV_PIX_FMT_VAAPI,
       "Expected format to be AV_PIX_FMT_VAAPI, got " +
-          std::string(av_get_pix_fmt_name((AVPixelFormat)av_frame->format)));
-  auto frameDims = FrameDims(av_frame->height, av_frame->width);
+          std::string(av_get_pix_fmt_name((AVPixelFormat)av_frame.format)));
+  auto frameDims = FrameDims(av_frame.height, av_frame.width);
   torch::stable::Tensor& dst = frame_output.data;
   if (pre_allocated_output_tensor.has_value()) {
     auto shape = pre_allocated_output_tensor.value().sizes();
@@ -502,10 +500,10 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output(
 }
 
 void XpuDeviceInterface::convert_av_frame_to_frame_output_with_filter_graph(
-    UniqueAVFrame& av_frame,
+    const AVFrame& av_frame,
     torch::stable::Tensor& dst) {
   DEBUG_LOG(xpu::VERBOSE, "Using VAAPI filter graph backend for conversion");
-  auto frameDims = FrameDims(av_frame->height, av_frame->width);
+  auto frameDims = FrameDims(av_frame.height, av_frame.width);
 
   // We need to compare the current frame context with our previous frame
   // context. If they are different, then we need to re-create our colorspace
@@ -515,17 +513,17 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output_with_filter_graph(
   // resolution to change mid-stream. Finally, we want to reuse the colorspace
   // conversion objects as much as possible for performance reasons.
   enum AVPixelFormat frameFormat =
-      static_cast<enum AVPixelFormat>(av_frame->format);
+      static_cast<enum AVPixelFormat>(av_frame.format);
   FiltersConfig filtersConfig;
 
-  filtersConfig.input_width = av_frame->width;
-  filtersConfig.input_height = av_frame->height;
+  filtersConfig.input_width = av_frame.width;
+  filtersConfig.input_height = av_frame.height;
   filtersConfig.input_format = frameFormat;
-  filtersConfig.input_aspect_ratio = av_frame->sample_aspect_ratio;
+  filtersConfig.input_aspect_ratio = av_frame.sample_aspect_ratio;
   // Actual output color format will be set via filter options
   filtersConfig.output_format = AV_PIX_FMT_VAAPI;
   filtersConfig.time_base = time_base_;
-  filtersConfig.hw_frames_ctx.reset(av_buffer_ref(av_frame->hw_frames_ctx));
+  filtersConfig.hw_frames_ctx.reset(av_buffer_ref(av_frame.hw_frames_ctx));
 
   std::stringstream filters;
   filters << "scale_vaapi=" << frameDims.width << ":" << frameDims.height;
@@ -552,7 +550,7 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output_with_filter_graph(
 }
 
 bool XpuDeviceInterface::convert_av_frame_to_frame_output_with_sycl(
-    [[maybe_unused]] UniqueAVFrame& frame,
+    [[maybe_unused]] const AVFrame& frame,
     [[maybe_unused]] torch::stable::Tensor& dst) {
   bool converted = false;
   if (!xpu::use_sycl_color_conversion_kernel()) {
@@ -564,11 +562,11 @@ bool XpuDeviceInterface::convert_av_frame_to_frame_output_with_sycl(
 
 #ifdef WITH_SYCL_KERNELS
   DEBUG_LOG(xpu::VERBOSE, "Using SYCL kernel backend for conversion");
-  TORCH_CHECK_EQ(frame->format, AV_PIX_FMT_VAAPI);
+  TORCH_CHECK_EQ(frame.format, AV_PIX_FMT_VAAPI);
   VADRMPRIMESurfaceDescriptor desc{};
   VAStatus sts = vaExportSurfaceHandle(
-      getVaDisplayFromAV(frame.get()),
-      (VASurfaceID)(uintptr_t)frame->data[3],
+      getVaDisplayFromAV(const_cast<AVFrame*>(&frame)),
+      (VASurfaceID)(uintptr_t)frame.data[3],
       VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
       VA_EXPORT_SURFACE_READ_ONLY,
       &desc);
@@ -618,11 +616,11 @@ bool XpuDeviceInterface::convert_av_frame_to_frame_output_with_sycl(
       (uint8_t*)usm_ptr + desc.layers[0].offset[0],
       (uint8_t*)usm_ptr + desc.layers[1].offset[0],
       (uint8_t*)dst.data_ptr(),
-      frame->width,
-      frame->height,
+      frame.width,
+      frame.height,
       desc.layers[0].pitch[0],
-      frame->color_range,
-      frame->colorspace);
+      frame.color_range,
+      frame.colorspace);
 
   zeMemFree(context->zeCtx, usm_ptr);
   converted = true;

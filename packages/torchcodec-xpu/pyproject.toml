@@ -3,7 +3,7 @@ requires = [
     "pybind11",
     "scikit-build-core>=0.10",
     "torch~=2.13.0",  # WA: must be specified in root project with build-constraint-dependencies
-    "torchcodec~=0.15.0"
+    "torchcodec~=0.16.0"
 ]
 build-backend = "scikit_build_core.build"
 
@@ -19,7 +19,7 @@ authors = [
 dynamic = ["version"]
 dependencies = [
     "torch~=2.13.0",
-    "torchcodec~=0.15.0"
+    "torchcodec~=0.16.0"
 ]
 
 [project.urls]
@@ -31,6 +31,7 @@ device_backend = 'torchcodec_xpu:load_torchcodec_xpu_shared_library'
 [project.optional-dependencies]
 test = [
     "numpy",
+    "pillow",
     "pytest",
     "torcheval",
     "torchvision",

@@ -24,6 +24,9 @@
 //   permute_2D_sparse_data_xpu (SYCL)
 //     → permute_2D_sparse_data_cuda (CUDA)
 //
+//   permute_2D_sparse_preallocated_out_xpu (SYCL)
+//     → permute_2D_sparse_preallocated_out_cuda (CUDA)
+//
 // DESCRIPTION:
 //   Permutes 2D sparse data (indices, lengths, optional weights) according to
 //   a permutation vector. Used for reordering embedding table features.
@@ -199,6 +202,10 @@ private:
 /**
  * @brief XPU implementation of permute_2D_sparse_data.
  *
+ * Thin wrapper that delegates to permute_2D_sparse_preallocated_out_xpu with
+ * no pre-allocated output buffers. Mirrors the FBGEMM CUDA layout where
+ * permute_2D_sparse_data_cuda calls permute_2D_sparse_preallocated_out_cuda.
+ *
  * @param permute Permutation indices [T] - int32
  * @param lengths Input lengths tensor [T, B] - int32/int64
  * @param indices Concatenated indices tensor - any supported type
@@ -213,5 +220,44 @@ permute_2D_sparse_data_xpu(
     const at::Tensor& indices,
     const std::optional<at::Tensor>& weights,
     const std::optional<int64_t>& permuted_lengths_sum);
+
+////////////////////////////////////////////////////////////////////////////////
+// permute_2D_sparse_preallocated_out_xpu - Host Function
+////////////////////////////////////////////////////////////////////////////////
+//
+// CUDA SOURCE MAPPING:
+//   CUDA Function: permute_2D_sparse_preallocated_out_cuda
+//   CUDA File: fbgemm_gpu/src/sparse_ops/sparse_permute_2d.cu
+//
+// DESCRIPTION:
+//   Core implementation of the 2D sparse data permutation. Accepts optional
+//   pre-allocated output tensors so callers can reuse buffers across
+//   invocations. When an output is not provided it is allocated internally.
+//
+////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * @brief XPU core implementation of permute_2D_sparse_preallocated_out.
+ *
+ * @param permute Permutation indices [T] - int32
+ * @param lengths Input lengths tensor [T, B] - int32/int64
+ * @param indices Concatenated indices tensor - any supported type
+ * @param weights Optional weights tensor - floating/half type
+ * @param permuted_lengths_sum Optional precomputed sum of permuted lengths
+ * @param permuted_lengths_out Optional pre-allocated permuted_lengths buffer
+ * @param permuted_indices_out Optional pre-allocated permuted_indices buffer
+ * @param permuted_weights_out Optional pre-allocated permuted_weights buffer
+ * @return Tuple of (permuted_lengths, permuted_indices, permuted_weights)
+ */
+std::tuple<at::Tensor, at::Tensor, std::optional<at::Tensor>>
+permute_2D_sparse_preallocated_out_xpu(
+    const at::Tensor& permute,
+    const at::Tensor& lengths,
+    const at::Tensor& indices,
+    const std::optional<at::Tensor>& weights,
+    const std::optional<int64_t>& permuted_lengths_sum,
+    const std::optional<at::Tensor>& permuted_lengths_out,
+    const std::optional<at::Tensor>& permuted_indices_out,
+    const std::optional<at::Tensor>& permuted_weights_out);
 
 } // namespace fbgemm_xpu

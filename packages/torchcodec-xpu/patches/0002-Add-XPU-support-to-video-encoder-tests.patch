@@ -34,14 +34,14 @@ Signed-off-by: Edgar Romo Montiel <edgar.romo.montiel@intel.com>
 diff --git a/test/test_encoders.py b/test/test_encoders.py
 --- a/test/test_encoders.py
 +++ b/test/test_encoders.py
-@@ -25,6 +25,7 @@ from .utils import (
+@@ -38,6 +38,7 @@ from .utils import (
      NASA_AUDIO_MP3_44100,
      NASA_VIDEO,
      needs_cuda,
 +    needs_xpu,
      needs_ffmpeg_cli,
-     psnr,
-     SINE_MONO_S32,
+     needs_jpeg,
+     needs_png,
 @@ -194,11 +195,23 @@ class TestEncoder:
          pytest.param(
              "cuda",

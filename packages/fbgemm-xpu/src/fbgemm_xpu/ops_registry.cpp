@@ -98,6 +98,21 @@ TORCH_LIBRARY_FRAGMENT(fbgemm, m)
         );
     }
 
+    if (!utils::torch::schemaExists("fbgemm::permute_2D_sparse_preallocated_out")) {
+        m.def(
+            "permute_2D_sparse_preallocated_out("
+            "    Tensor permute, "
+            "    Tensor lengths, "
+            "    Tensor values, "
+            "    Tensor? weights=None, "
+            "    SymInt? permuted_lengths_sum=None, "
+            "    Tensor? permuted_lengths_out=None, "
+            "    Tensor? permuted_indices_out=None, "
+            "    Tensor? permuted_weights_out=None"
+            ") -> (Tensor, Tensor, Tensor?)"
+        );
+    }
+
     if (!utils::torch::schemaExists("fbgemm::get_infos_metadata")) {
         m.def(
             "get_infos_metadata(Tensor unused, int B, int T) -> (int, int)"

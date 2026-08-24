@@ -113,6 +113,57 @@ TORCH_LIBRARY_FRAGMENT(fbgemm, m)
         );
     }
 
+    if (!utils::torch::schemaExists("fbgemm::block_bucketize_sparse_features")) {
+        m.def(
+            "block_bucketize_sparse_features("
+            "    Tensor lengths, "
+            "    Tensor indices, "
+            "    bool bucketize_pos, "
+            "    bool sequence, "
+            "    Tensor block_sizes, "
+            "    int my_size, "
+            "    Tensor? weights=None, "
+            "    Tensor? batch_size_per_feature=None, "
+            "    int max_B=0, "
+            "    Tensor[]? block_bucketize_pos=None, "
+            "    bool keep_orig_idx=False, "
+            "    Tensor? total_num_blocks=None, "
+            "    Tensor? keep_orig_idx_per_feature=None"
+            ") -> (Tensor, Tensor, Tensor?, Tensor?, Tensor?)"
+        );
+    }
+
+    if (!utils::torch::schemaExists("fbgemm::block_bucketize_sparse_features_inference")) {
+        m.def(
+            "block_bucketize_sparse_features_inference("
+            "    Tensor lengths, "
+            "    Tensor indices, "
+            "    bool bucketize_pos, "
+            "    bool sequence, "
+            "    Tensor block_sizes, "
+            "    int my_size, "
+            "    Tensor? weights=None, "
+            "    Tensor? batch_size_per_feature=None, "
+            "    int max_B=0, "
+            "    Tensor[]? block_bucketize_pos=None, "
+            "    bool return_bucket_mapping=False, "
+            "    bool keep_orig_idx=False, "
+            "    Tensor? total_num_blocks=None, "
+            "    Tensor? keep_orig_idx_per_feature=None"
+            ") -> (Tensor, Tensor, Tensor?, Tensor?, Tensor?, Tensor?)"
+        );
+    }
+
+    if (!utils::torch::schemaExists("fbgemm::populate_bucketized_permute")) {
+        m.def(
+            "populate_bucketized_permute("
+            "    Tensor lengths, "
+            "    Tensor bucketized_lengths, "
+            "    Tensor bucket_mapping"
+            ") -> Tensor"
+        );
+    }
+
     if (!utils::torch::schemaExists("fbgemm::expand_into_jagged_permute")) {
         m.def(
             "expand_into_jagged_permute("

@@ -57,7 +57,7 @@ apt-get update && apt-get install -y \
     libswscale-dev
 ```
 
-  * By self-building FFmpeg from sources:
+  * By self-building FFmpeg from sources. The following example provides the minimal configuration required for hardware FFmpeg VAAPI codecs to be functional. For software fallback support, FFmpeg needs to be additionally built with enabled software codecs such as x264, x265, etc.:
 
 ```
 git clone https://git.ffmpeg.org/ffmpeg.git && cd ffmpeg

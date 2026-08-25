@@ -5,7 +5,7 @@
 # Import torch first so libtorch shared libraries are mapped into the process
 # before _C loads, then fbgemm_gpu so that all "fbgemm" operator schemas are
 # registered before _C provides the XPU implementations via TORCH_LIBRARY_IMPL.
-import torch  # noqa: F401, E402
+import torch  # noqa: F401, E402, I001
 import fbgemm_gpu  # noqa: F401, E402
 
 # Import the compiled C extension (_C) which contains the registered operators.

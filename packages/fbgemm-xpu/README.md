@@ -94,7 +94,7 @@ Known limitations will be documented as new FBGEMM operators are integrated into
 [PVC]: https://www.intel.com/content/www/us/en/ark/products/series/232874/intel-data-center-gpu-max-series.html
 
 [fbgemm-sparse-ops]: https://docs.pytorch.org/FBGEMM/fbgemm_gpu/python-api/sparse_ops.html
-[fbgemm-tag]: https://github.com/pytorch/FBGEMM/tree/v1.8.0
+[FBGEMM]: https://github.com/pytorch/FBGEMM
 [op-asynchronous_complete_cumsum]: https://docs.pytorch.org/FBGEMM/fbgemm_gpu/python-api/sparse_ops.html#torch.ops.fbgemm.asynchronous_complete_cumsum
 [op-permute_1D_sparse_data]: https://docs.pytorch.org/FBGEMM/fbgemm_gpu/python-api/sparse_ops.html#torch.ops.fbgemm.permute_1D_sparse_data
 [op-permute_2D_sparse_data]: https://docs.pytorch.org/FBGEMM/fbgemm_gpu/python-api/sparse_ops.html#torch.ops.fbgemm.permute_2D_sparse_data

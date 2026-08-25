@@ -17,15 +17,14 @@ import fbgemm_xpu
 
 This plugin provides Intel® XPU (SYCL) implementations for the following
 operators, registered under the `torch.ops.fbgemm` namespace. Signatures
-and behavior match [FBGEMM]. See the upstream
-[FBGEMM sparse operators][fbgemm-sparse-ops] page for usage.
+and behavior match [FBGEMM].
 
-Documented in the upstream FBGEMM sparse ops page:
+* Implemented [FBGEMM sparse operators][fbgemm-sparse-ops]:
 
-- [`asynchronous_complete_cumsum`][op-asynchronous_complete_cumsum]
-- [`permute_1D_sparse_data`][op-permute_1D_sparse_data]
-- [`permute_2D_sparse_data`][op-permute_2D_sparse_data]
-- [`block_bucketize_sparse_features`][op-block_bucketize_sparse_features]
+  - [`asynchronous_complete_cumsum`][op-asynchronous_complete_cumsum]
+  - [`permute_1D_sparse_data`][op-permute_1D_sparse_data]
+  - [`permute_2D_sparse_data`][op-permute_2D_sparse_data]
+  - [`block_bucketize_sparse_features`][op-block_bucketize_sparse_features]
 
 The following operators are also implemented but do not constitute
 public documented FBGEMM API. These are extra variants, helpers, or utility

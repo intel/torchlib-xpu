@@ -17,8 +17,7 @@ import fbgemm_xpu
 
 This plugin provides Intel® XPU (SYCL) implementations for the following
 operators, registered under the `torch.ops.fbgemm` namespace. Signatures
-and behavior match [FBGEMM v1.8.0][fbgemm-tag] (pinned in
-[pyproject.toml](pyproject.toml)); see the upstream
+and behavior match [FBGEMM]. See the upstream
 [FBGEMM sparse operators][fbgemm-sparse-ops] page for usage.
 
 - [`asynchronous_complete_cumsum`][op-asynchronous_complete_cumsum]

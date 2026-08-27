@@ -113,6 +113,12 @@ TORCH_LIBRARY_FRAGMENT(fbgemm, m)
         );
     }
 
+    if (!utils::torch::schemaExists("fbgemm::get_infos_metadata")) {
+        m.def(
+            "get_infos_metadata(Tensor unused, int B, int T) -> (int, int)"
+        );
+    }
+
     if (!utils::torch::schemaExists("fbgemm::block_bucketize_sparse_features")) {
         m.def(
             "block_bucketize_sparse_features("

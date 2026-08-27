@@ -424,6 +424,7 @@ jobs:
         pytest -rsf fbgemm_gpu/test/sparse/block_bucketize_test.py
         pytest -rsf fbgemm_gpu/test/tbe/utils/generate_vbe_metadata_test.py
         pytest -rsf fbgemm_gpu/test/tbe/utils/split_embeddings_utils_test.py
+        pytest -rsf fbgemm_gpu/test/jagged/expand_into_jagged_permute_test.py
 
   publish:
     needs: [ compose, test-torchcodec, test-fbgemm ]

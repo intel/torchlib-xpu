@@ -32,32 +32,36 @@ namespace fbgemm_xpu {
 /**
  * @brief ExpandIntoJaggedPermuteKernel operator implementation
  *
- * Mirrors the CUDA kernel expand_into_jagged_permute_kernel 1:1:
- *   - dimension 1 (local_id(1)) walks tables within a work-group,
- *     combined with a grid-stride loop over tables (group(0)).
- *   - dimension 0 (local_id(0)) walks elements within a segment.
+ * Mirrors the CUDA kernel expand_into_jagged_permute_kernel, with the CUDA
+ * dimension order reversed because SYCL varies the *last* nd_item dimension
+ * fastest while CUDA varies threadIdx.x fastest:
+ *   - dimension 0 walks tables within a work-group (CUDA threadIdx.y),
+ *     combined with a grid-stride loop over tables.
+ *   - dimension 1 walks elements within a segment (CUDA threadIdx.x), so
+ *     neighbouring work-items store to neighbouring output_permute entries.
  */
-template <typename index_t>
-void ExpandIntoJaggedPermuteKernel<index_t>::operator()(
+template <typename index_t, typename offsets_t>
+void ExpandIntoJaggedPermuteKernel<index_t, offsets_t>::operator()(
     const sycl::nd_item<2>& item) const {
     // Grid-stride loop bounds over tables (mirrors CUDA blockIdx.x/blockDim.y).
     const int32_t t_start = static_cast<int32_t>(
-        item.get_group(0) * item.get_local_range(1) + item.get_local_id(1));
+        item.get_group(0) * item.get_local_range(0) + item.get_local_id(0));
     const int32_t stride = static_cast<int32_t>(
-        item.get_group_range(0) * item.get_local_range(1));
+        item.get_group_range(0) * item.get_local_range(0));
 
-    // Within-segment thread coordinates (mirrors CUDA threadIdx.x/blockDim.x).
-    const int32_t tid = static_cast<int32_t>(item.get_local_id(0));
-    const int32_t threads_per_segment =
-        static_cast<int32_t>(item.get_local_range(0));
+    // Within-segment work-item coordinates (mirrors CUDA threadIdx.x).
+    const offsets_t tid = static_cast<offsets_t>(item.get_local_id(1));
+    const offsets_t threads_per_segment =
+        static_cast<offsets_t>(item.get_local_range(1));
 
     for (int32_t t = t_start; t < input_size_; t += stride) {
-        const index_t output_start = output_offsets_[t];
-        const index_t segment_length =
+        const offsets_t output_start = output_offsets_[t];
+        const offsets_t segment_length =
             output_offsets_[t + 1] - output_offsets_[t];
-        const index_t input_start = input_offsets_[permute_[t]];
-        for (int32_t i = tid; i < segment_length; i += threads_per_segment) {
-            output_permute_[output_start + i] = input_start + i;
+        const offsets_t input_start = input_offsets_[permute_[t]];
+        for (offsets_t i = tid; i < segment_length; i += threads_per_segment) {
+            output_permute_[output_start + i] =
+                static_cast<index_t>(input_start + i);
         }
     }
 }
@@ -111,31 +115,35 @@ at::Tensor expand_into_jagged_permute_xpu(
     sycl::queue& queue = c10::xpu::getCurrentXPUStream(
         permute.device().index()).queue();
 
-    // Work-group layout mirrors the CUDA dim3(kWarpSize, T_blocks) launch:
-    //   dim 0 -> within-segment threads (kWarpSize = 32)
-    //   dim 1 -> tables per block (kMaxThreads / kWarpSize = 32)
+    // Work-group layout mirrors the CUDA dim3(kWarpSize, T_blocks) launch with
+    // the dimension order reversed, because SYCL varies the last nd_range
+    // dimension fastest:
+    //   dim 0 -> tables per work-group (kMaxThreads / kWarpSize = 32), CUDA .y
+    //   dim 1 -> within-segment work-items (kWarpSize = 32), CUDA .x
     constexpr int32_t kThreadsPerSegment = 32;
     constexpr int32_t kTablesPerBlock = 32;
     const int64_t num_blocks =
         (permute_size + kTablesPerBlock - 1) / kTablesPerBlock;
 
     sycl::range<2> global_range{
-        static_cast<size_t>(num_blocks * kThreadsPerSegment),
-        static_cast<size_t>(kTablesPerBlock)};
+        static_cast<size_t>(num_blocks * kTablesPerBlock),
+        static_cast<size_t>(kThreadsPerSegment)};
     sycl::range<2> local_range{
-        static_cast<size_t>(kThreadsPerSegment),
-        static_cast<size_t>(kTablesPerBlock)};
+        static_cast<size_t>(kTablesPerBlock),
+        static_cast<size_t>(kThreadsPerSegment)};
 
-    // The CUDA kernel is templated on <index_t, offsets_t>; the CUDA dispatch
-    // sets offsets_t = index_t, so a single index type suffices here.
+    // Mirrors the CUDA dispatch, which binds offsets_t = index_t while keeping
+    // the two template parameters distinct.
     AT_DISPATCH_INDEX_TYPES(
         permute.scalar_type(), "expand_into_jagged_permute_xpu", [&] {
+            using offsets_t = index_t;
             queue.submit([&](sycl::handler& cgh) {
-                cgh.parallel_for<ExpandIntoJaggedPermuteKernel<index_t>>(
+                cgh.parallel_for<
+                    ExpandIntoJaggedPermuteKernel<index_t, offsets_t>>(
                     sycl::nd_range<2>(global_range, local_range),
-                    ExpandIntoJaggedPermuteKernel<index_t>(
-                        input_offsets_contig.data_ptr<index_t>(),
-                        output_offsets_contig.data_ptr<index_t>(),
+                    ExpandIntoJaggedPermuteKernel<index_t, offsets_t>(
+                        input_offsets_contig.data_ptr<offsets_t>(),
+                        output_offsets_contig.data_ptr<offsets_t>(),
                         static_cast<int32_t>(permute_size),
                         permute_contig.data_ptr<index_t>(),
                         output_permute.data_ptr<index_t>()));

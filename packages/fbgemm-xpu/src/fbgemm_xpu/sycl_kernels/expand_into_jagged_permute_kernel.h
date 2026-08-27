@@ -15,7 +15,7 @@
 //   File: fbgemm_gpu/src/sparse_ops/sparse_expand_into_jagged_permute.cu
 //
 // KERNEL MAPPING:
-//   ExpandIntoJaggedPermuteKernel<index_t> (SYCL)
+//   ExpandIntoJaggedPermuteKernel<index_t, offsets_t> (SYCL)
 //     -> expand_into_jagged_permute_kernel<index_t, offsets_t> (CUDA)
 //
 // HOST FUNCTION MAPPING:
@@ -32,8 +32,14 @@
 //
 //   for i in [0, segment_length). The CUDA kernel uses a 2D thread block
 //   (threadIdx.y over tables, threadIdx.x within a segment) combined with a
-//   grid-stride loop over tables; this SYCL port mirrors that layout 1:1 using
-//   a 2D nd_range (local_id(1) over tables, local_id(0) within a segment).
+//   grid-stride loop over tables.
+//
+//   CUDA and SYCL order the dimensions of a multi-dimensional index in
+//   opposite ways: threadIdx.x is the fastest-varying CUDA dimension, whereas
+//   in SYCL it is the *last* dimension of an nd_item<N>. The port therefore
+//   maps CUDA .x onto SYCL dimension 1 and CUDA .y onto SYCL dimension 0, so
+//   that consecutive work-items still walk consecutive elements of a segment
+//   and the stores to output_permute stay coalesced.
 //
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -64,23 +70,25 @@ namespace fbgemm_xpu {
 //
 // DESCRIPTION:
 //   Templated kernel that expands a segment-level permutation into a flat
-//   index permutation. The reference CUDA kernel is templated on both index_t
-//   (permute / output_permute) and offsets_t (offsets); the CUDA dispatch sets
-//   offsets_t = index_t, so this port uses a single index type.
+//   index permutation. Like the reference CUDA kernel it is templated on both
+//   index_t (permute / output_permute) and offsets_t (the offset tensors), so
+//   the two roles stay distinguishable even though the current dispatch binds
+//   offsets_t = index_t.
 //
-//   Thread mapping (mirrors the CUDA dim3(kWarpSize, T_blocks) layout):
-//     - dimension 1 (local_id(1)) indexes tables within a work-group
-//     - dimension 0 (local_id(0)) indexes elements within a segment
+//   Work-item mapping (mirrors the CUDA dim3(kWarpSize, T_blocks) layout with
+//   the CUDA/SYCL dimension order reversed):
+//     - dimension 0 (local_id(0)) indexes tables within a work-group  (CUDA .y)
+//     - dimension 1 (local_id(1)) indexes elements within a segment   (CUDA .x)
 //   A grid-stride loop over tables keeps correctness for any input_size,
 //   matching the CUDA grid-stride loop over t.
 //
 ////////////////////////////////////////////////////////////////////////////////
-template <typename index_t>
+template <typename index_t, typename offsets_t>
 class ExpandIntoJaggedPermuteKernel {
 public:
     ExpandIntoJaggedPermuteKernel(
-        const index_t* input_offsets,
-        const index_t* output_offsets,
+        const offsets_t* input_offsets,
+        const offsets_t* output_offsets,
         int32_t input_size,
         const index_t* permute,
         index_t* output_permute)
@@ -93,8 +101,8 @@ public:
     void operator()(const sycl::nd_item<2>& item) const;
 
 private:
-    const index_t* input_offsets_;
-    const index_t* output_offsets_;
+    const offsets_t* input_offsets_;
+    const offsets_t* output_offsets_;
     int32_t input_size_;
     const index_t* permute_;
     index_t* output_permute_;

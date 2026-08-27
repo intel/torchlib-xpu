@@ -25,6 +25,7 @@ and behavior match [FBGEMM].
   - [`permute_1D_sparse_data`][op-permute_1D_sparse_data]
   - [`permute_2D_sparse_data`][op-permute_2D_sparse_data]
   - [`block_bucketize_sparse_features`][op-block_bucketize_sparse_features]
+  - [`expand_into_jagged_permute`][op-expand_into_jagged_permute]
 
 The following operators are also implemented but do not constitute
 public documented FBGEMM API. These are extra variants, helpers, or utility
@@ -103,3 +104,4 @@ Known limitations will be documented as new FBGEMM operators are integrated into
 [op-permute_1D_sparse_data]: https://docs.pytorch.org/FBGEMM/fbgemm_gpu/python-api/sparse_ops.html#torch.ops.fbgemm.permute_1D_sparse_data
 [op-permute_2D_sparse_data]: https://docs.pytorch.org/FBGEMM/fbgemm_gpu/python-api/sparse_ops.html#torch.ops.fbgemm.permute_2D_sparse_data
 [op-block_bucketize_sparse_features]: https://docs.pytorch.org/FBGEMM/fbgemm_gpu/python-api/sparse_ops.html#torch.ops.fbgemm.block_bucketize_sparse_features
+[op-expand_into_jagged_permute]: https://docs.pytorch.org/FBGEMM/fbgemm_gpu/python-api/sparse_ops.html#torch.ops.fbgemm.expand_into_jagged_permute

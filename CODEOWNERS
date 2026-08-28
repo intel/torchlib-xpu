@@ -1,1 +1,4 @@
-* @dvrogozh @eromomon @luis-real
+* @dvrogozh @luis-real
+
+/packages/torchcodec-xpu/ @dvrogozh @eromomon
+/packages/fbgemm-xpu/ @aagalleg @dvrogozh @flezaalv @molintc @mkrze

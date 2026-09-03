@@ -60,6 +60,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "reorder_batched_ad.h"
+#include "fbgemm_utils/dispatch_macros.h"
 
 #include <algorithm>
 #include <cstdint>

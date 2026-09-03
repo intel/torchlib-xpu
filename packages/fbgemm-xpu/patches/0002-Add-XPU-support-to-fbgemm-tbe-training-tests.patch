@@ -1,0 +1,240 @@
+From f701f9009ddade049cc4fd66a55be6bc52552eac Mon Sep 17 00:00:00 2001
+From: molintc <marek.olczak@intel.com>
+Date: Thu, 3 Sep 2026 19:15:28 +0200
+Subject: [PATCH] Add direct XPU coverage for FBGEMM lookup operators
+
+Exercise dense lookup forward and split rowwise Adagrad forward plus in-place update through torch.ops without constructing or modifying the FBGEMM TBE frontend. Keep this patch test-only so the installed fbgemm-gpu-cpu runtime remains pristine.
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+---
+ .../test/tbe/training/xpu_lookup_ops_test.py  | 221 ++++++++++++++++++
+ 1 file changed, 221 insertions(+)
+ create mode 100644 fbgemm_gpu/test/tbe/training/xpu_lookup_ops_test.py
+
+diff --git a/fbgemm_gpu/test/tbe/training/xpu_lookup_ops_test.py b/fbgemm_gpu/test/tbe/training/xpu_lookup_ops_test.py
+new file mode 100644
+index 0000000..c60c537
+--- /dev/null
++++ b/fbgemm_gpu/test/tbe/training/xpu_lookup_ops_test.py
+@@ -0,0 +1,221 @@
++# Copyright (c) Meta Platforms, Inc. and affiliates. All rights reserved.
++# Copyright (c) 2026 Intel Corporation. All Rights Reserved.
++# SPDX-License-Identifier: BSD-3-Clause
++
++import unittest
++
++import fbgemm_xpu  # noqa: F401
++import torch
++
++
++@unittest.skipUnless(torch.xpu.is_available(), "XPU is required")
++class XpuLookupOpsTest(unittest.TestCase):
++    def setUp(self) -> None:
++        self.device = torch.accelerator.current_accelerator(check_available=True)
++        self.assertIsNotNone(self.device)
++        self.assertEqual(self.device.type, "xpu")
++
++    def test_dense_lookup_forward(self) -> None:
++        dev_weights = torch.tensor(
++            [0, 1, 2, 3, 10, 11, 12, 13],
++            device=self.device,
++            dtype=torch.float32,
++        )
++        weights_offsets = torch.tensor(
++            [0], device=self.device, dtype=torch.int64
++        )
++        d_offsets = torch.tensor([0, 4], device=self.device, dtype=torch.int64)
++        hash_size_cumsum = torch.tensor(
++            [0, 2], device=self.device, dtype=torch.int64
++        )
++        indices = torch.tensor([1], device=self.device, dtype=torch.int64)
++        offsets = torch.tensor([0, 1], device=self.device, dtype=torch.int64)
++
++        output = torch.ops.fbgemm.dense_embedding_codegen_lookup_function(
++            dev_weights,
++            weights_offsets,
++            d_offsets,
++            4,
++            4,
++            hash_size_cumsum,
++            2,
++            indices,
++            offsets,
++            2,
++            None,
++            None,
++            1,
++            None,
++            None,
++            None,
++            -1,
++            -1,
++            -1,
++            False,
++        )
++
++        self.assertEqual(output.shape, (1, 4))
++        self.assertEqual(output.dtype, torch.float16)
++        torch.testing.assert_close(
++            output.cpu(),
++            torch.tensor([[10, 11, 12, 13]], dtype=torch.float16),
++        )
++
++    def test_dense_lookup_backward(self) -> None:
++        dev_weights = torch.tensor(
++            [0, 1, 2, 3, 10, 11, 12, 13],
++            device=self.device,
++            dtype=torch.float32,
++            requires_grad=True,
++        )
++        weights_offsets = torch.tensor(
++            [0], device=self.device, dtype=torch.int64
++        )
++        d_offsets = torch.tensor([0, 4], device=self.device, dtype=torch.int64)
++        hash_size_cumsum = torch.tensor(
++            [0, 2], device=self.device, dtype=torch.int64
++        )
++        indices = torch.tensor([1], device=self.device, dtype=torch.int64)
++        offsets = torch.tensor([0, 1], device=self.device, dtype=torch.int64)
++
++        output = torch.ops.fbgemm.dense_embedding_codegen_lookup_function(
++            dev_weights,
++            weights_offsets,
++            d_offsets,
++            4,
++            4,
++            hash_size_cumsum,
++            2,
++            indices,
++            offsets,
++            2,
++            None,
++            None,
++            0,
++            None,
++            None,
++            None,
++            -1,
++            -1,
++            -1,
++            False,
++        )
++        output.sum().backward()
++
++        gradient = dev_weights.grad
++        if gradient is None:
++            self.fail("Dense lookup backward did not produce a weight gradient")
++        torch.testing.assert_close(
++            gradient.cpu(),
++            torch.tensor(
++                [0, 0, 0, 0, 1, 1, 1, 1],
++                dtype=torch.float32,
++            ),
++        )
++
++    def test_split_rowwise_adagrad_forward_and_update(self) -> None:
++        placeholder = torch.zeros(
++            (), device=self.device, dtype=torch.float32, requires_grad=True
++        )
++        dev_weights = torch.tensor(
++            [1, 2, 3, 4, 10, 11, 12, 13],
++            device=self.device,
++            dtype=torch.float32,
++        )
++        uvm_weights = torch.empty(0, device=self.device, dtype=torch.float32)
++        weights_placements = torch.tensor(
++            [0], device=self.device, dtype=torch.int32
++        )
++        weights_offsets = torch.tensor(
++            [0], device=self.device, dtype=torch.int64
++        )
++        lxu_cache_weights = torch.empty(
++            (0, 4), device=self.device, dtype=torch.float32
++        )
++        d_offsets = torch.tensor([0, 4], device=self.device, dtype=torch.int64)
++        hash_size_cumsum = torch.tensor(
++            [0, 2], device=self.device, dtype=torch.int64
++        )
++        indices = torch.tensor([0], device=self.device, dtype=torch.int64)
++        offsets = torch.tensor([0, 1], device=self.device, dtype=torch.int64)
++        lxu_cache_locations = torch.empty(
++            0, device=self.device, dtype=torch.int32
++        )
++        uvm_cache_stats = torch.empty(0, device=self.device, dtype=torch.int32)
++        momentum1_dev = torch.zeros(2, device=self.device, dtype=torch.float32)
++        momentum1_uvm = torch.empty(0, device=self.device, dtype=torch.float32)
++        momentum1_placements = torch.tensor(
++            [0], device=self.device, dtype=torch.int32
++        )
++        momentum1_offsets = torch.tensor(
++            [0], device=self.device, dtype=torch.int64
++        )
++        learning_rate = torch.tensor(0.5, dtype=torch.float32)
++
++        output = torch.ops.fbgemm.split_embedding_codegen_lookup_rowwise_adagrad_function_pt2(
++            placeholder,
++            [
++                dev_weights,
++                uvm_weights,
++                weights_placements,
++                weights_offsets,
++                lxu_cache_weights,
++            ],
++            d_offsets,
++            4,
++            4,
++            hash_size_cumsum,
++            2,
++            indices,
++            offsets,
++            2,
++            None,
++            None,
++            0,
++            [
++                None,
++                None,
++                None,
++                lxu_cache_locations,
++                uvm_cache_stats,
++                None,
++                None,
++            ],
++            [0, 26, (1 << 26) - 1],
++            [0.0, 0.0],
++            [False, False, True, False, False, False, False],
++            [
++                momentum1_dev,
++                momentum1_uvm,
++                momentum1_placements,
++                momentum1_offsets,
++            ],
++            learning_rate,
++            [0],
++            [0.0, 0.0, 0.0],
++            -1,
++            -1,
++            -1,
++            None,
++        )
++
++        self.assertEqual(output.shape, (1, 4))
++        self.assertEqual(output.dtype, torch.float32)
++        torch.testing.assert_close(
++            output.cpu(),
++            torch.tensor([[1, 2, 3, 4]], dtype=torch.float32),
++        )
++
++        output.sum().backward()
++
++        torch.testing.assert_close(
++            dev_weights.cpu(),
++            torch.tensor(
++                [0.5, 1.5, 2.5, 3.5, 10, 11, 12, 13],
++                dtype=torch.float32,
++            ),
++        )
++        torch.testing.assert_close(
++            momentum1_dev.cpu(),
++            torch.tensor([1, 0], dtype=torch.float32),
++        )

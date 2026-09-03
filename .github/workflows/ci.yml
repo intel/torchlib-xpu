@@ -442,11 +442,6 @@ jobs:
         ref: v1.8.0
         path: fbgemm
         clean: true
-    - name: 'Patch FBGEMM'
-      working-directory: fbgemm
-      run: |
-        rm -rf .git/rebase-apply
-        git am ../torchlib-xpu/packages/fbgemm-xpu/patches/0001-Add-XPU-support-to-fbgemm-tests.patch
     - name: 'Install Intel drivers'
       run: |
         add-apt-repository -y ppa:kobuk-team/intel-graphics
@@ -471,7 +466,22 @@ jobs:
     - name: 'Test gpu'
       run: |
         python -c "import torch; assert torch.xpu.is_available(), 'XPU (Intel GPU) is not available'"
-    - name: 'Test fbgemm-xpu'
+    - name: 'Test fbgemm-xpu with pristine FBGEMM'
+      run: |
+        pytest -rsf torchlib-xpu/packages/fbgemm-xpu/tests/
+    - name: 'Patch upstream FBGEMM tests'
+      working-directory: fbgemm
+      run: |
+        rm -rf .git/rebase-apply
+        git am ../torchlib-xpu/packages/fbgemm-xpu/patches/0001-Add-XPU-support-to-fbgemm-tests.patch
+        git am ../torchlib-xpu/packages/fbgemm-xpu/patches/0002-Add-XPU-support-to-fbgemm-tbe-training-tests.patch
+        unexpected=$(git diff --name-only v1.8.0 HEAD | grep -v '^fbgemm_gpu/test/' || true)
+        if [ -n "$unexpected" ]; then
+          echo "Patches modified non-test FBGEMM files:"
+          echo "$unexpected"
+          exit 1
+        fi
+    - name: 'Test patched upstream test suite'
       working-directory: fbgemm
       run: |
         pytest -rsf fbgemm_gpu/test/jagged/expand_into_jagged_permute_test.py
@@ -483,6 +493,7 @@ jobs:
         pytest -rsf fbgemm_gpu/test/sparse/reorder_batched_test.py
         pytest -rsf fbgemm_gpu/test/tbe/utils/generate_vbe_metadata_test.py
         pytest -rsf fbgemm_gpu/test/tbe/utils/split_embeddings_utils_test.py
+        pytest -rsf fbgemm_gpu/test/tbe/training/xpu_lookup_ops_test.py
 
   publish:
     needs: [ compose, test-torchcodec, test-fbgemm ]

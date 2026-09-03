@@ -101,10 +101,14 @@ at::Tensor asynchronous_inclusive_cumsum_xpu(const at::Tensor& t_in) {
   return t_out;
 }
 
+// _C_training links this file for the C++ cumsum helper used by backward, while
+// _C remains the sole owner of the dispatcher registrations.
+#ifndef FBGEMM_XPU_TRAINING_BUILD
 TORCH_LIBRARY_IMPL(fbgemm, XPU, m) {
   m.impl("asynchronous_complete_cumsum", &fbgemm_xpu::asynchronous_complete_cumsum_xpu);
   m.impl("asynchronous_exclusive_cumsum", &fbgemm_xpu::asynchronous_exclusive_cumsum_xpu);
   m.impl("asynchronous_inclusive_cumsum", &fbgemm_xpu::asynchronous_inclusive_cumsum_xpu);
 }
+#endif // FBGEMM_XPU_TRAINING_BUILD
 
 } // namespace fbgemm_xpu

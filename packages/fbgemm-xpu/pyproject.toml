@@ -1,5 +1,6 @@
 [build-system]
 requires = [
+    "jinja2",
     "numpy~=2.0",
     "pybind11",
     "scikit-build-core>=0.10",

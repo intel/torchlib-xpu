@@ -1,19 +1,29 @@
 /*
- * Copyright (c) Meta Platforms, Inc. and affiliates.
- * All rights reserved.
- *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the root directory of this source tree.
+ * Copyright (c) Meta Platforms, Inc. and affiliates. All rights reserved.
+ * Copyright (c) 2026 Intel Corporation. All Rights Reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
  */
 
 #pragma once
 
-#include <ATen/ATen.h>
 #include <cstdint>
+
+#include <ATen/ATen.h>
+
+namespace fbgemm_xpu {
 
 inline std::optional<int64_t> get_device_index_from_tensor(
     const at::Tensor& ten) {
   return {ten.device().index()};
+}
+
+inline std::optional<int64_t> get_device_index_from_tensor(
+    const std::optional<at::Tensor>& ten) {
+  if (ten) {
+    return {ten->device().index()};
+  } else {
+    return {};
+  }
 }
 
 inline bool torch_tensor_on_sycl_xpu_check(const at::Tensor& ten) {
@@ -28,6 +38,52 @@ inline bool torch_tensor_undefined(const at::Tensor& ten) {
   return ten.defined();
 }
 
+inline bool torch_tensor_undefined(const std::optional<at::Tensor>& ten) {
+  return !ten.has_value() || torch_tensor_undefined(ten.value());
+}
+
+inline bool torch_tensor_on_cpu_or_on_mtia_check(const at::Tensor& ten) {
+  return ten.is_cpu() || ten.is_mtia();
+}
+
+inline bool torch_tensor_on_same_device_check(
+    const at::Tensor& ten1,
+    const std::optional<at::Tensor>& ten2) {
+  return !ten2.has_value() || ten1.get_device() == ten2->get_device();
+}
+
+inline std::string torch_tensor_device_name(
+    const std::optional<at::Tensor>& ten) {
+  if (ten.has_value()) {
+    return torch_tensor_device_name(ten.value());
+  } else {
+    return "N/A";
+  }
+}
+
+inline bool torch_tensor_on_sycl_xpu_check(
+    const std::optional<at::Tensor>& ten) {
+  return !ten.has_value() || torch_tensor_on_sycl_xpu_check(ten.value());
+}
+
+#define TENSOR_ON_CPU_OR_MTIA(x)                                      \
+  TORCH_CHECK(                                                        \
+      torch_tensor_on_cpu_or_on_mtia_check(x),                        \
+      #x " must be a CPU or MTIA tensor; it is currently on device ", \
+      torch_tensor_device_name(x))
+
+#define TENSORS_EMPTY_OR_ON_SAME_DEVICE(x, y)                           \
+  TORCH_CHECK(                                                          \
+      torch_tensor_on_same_device_check(x, y) || (x.numel() == 0),      \
+      #x " must be empty or a XPU tensor; it is currently on device ", \
+      torch_tensor_device_name(x))
+
+#define TENSOR_ON_SYCL_XPU(x)                                  \
+  TORCH_CHECK(                                                 \
+      torch_tensor_on_sycl_xpu_check(x),                       \
+      #x " must be a SYCL XPU tensor; it is currently on device ", \
+      torch_tensor_device_name(x))
+
 // Generate constexpr array of variable names to improve diagnostic output and
 // raise a message if any non-empty tensor is not on a XPU or not on the same
 // XPU as all the other non-empty tensors.
@@ -38,6 +94,23 @@ inline bool torch_tensor_undefined(const at::Tensor& ten) {
     TORCH_CHECK(tensors_on_same_xpu.empty(), tensors_on_same_xpu);           \
   } while (false)
 
+inline at::Tensor aligned_grad_output_tensor_for_xpu_backwards(
+    const at::Tensor& grad_output) {
+  auto aligned_grad_output = grad_output;
+  // FIXME: to support aligned memory access in Vec4T load/store function
+  // 16 for FP32 and 8 for FP16
+  if (!aligned_grad_output.is_contiguous()) {
+    aligned_grad_output = aligned_grad_output.contiguous();
+  }
+  if (reinterpret_cast<uint64_t>(aligned_grad_output.data_ptr()) % 16 != 0) {
+    aligned_grad_output =
+        at::empty_like(aligned_grad_output).copy_(aligned_grad_output);
+  }
+  TORCH_CHECK(aligned_grad_output.is_contiguous());
+  TORCH_CHECK(
+      reinterpret_cast<uint64_t>(aligned_grad_output.data_ptr()) % 16 == 0);
+  return aligned_grad_output;
+}
 
 template <typename... Tensors>
 std::string tensor_on_same_xpu_if_not_optional_check(
@@ -107,3 +180,5 @@ std::string tensor_on_same_xpu_if_not_optional_check(
 
   return msg;
 }
+
+} // namespace fbgemm_xpu

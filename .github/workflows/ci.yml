@@ -491,6 +491,9 @@ jobs:
     - name: 'Test fbgemm-xpu jagged regressions'
       working-directory: torchlib-xpu
       run: |
+        # Upstream FBGEMM tests (patched) cover shared operator behavior and parity.
+        # The tests below cover XPU/SYCL cases that upstream does not:
+        # launch-grid limits, device validation, and strided fast-path inputs.
         pytest -rsf packages/fbgemm-xpu/tests/test_jagged_device_validation.py
         pytest -rsf packages/fbgemm-xpu/tests/test_jagged_fp16_dense_batch_alignment.py
         pytest -rsf packages/fbgemm-xpu/tests/test_jagged_fp16_sentinel_search.py

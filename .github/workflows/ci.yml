@@ -469,6 +469,9 @@ jobs:
         python -c "import torch; assert torch.xpu.is_available(), 'XPU (Intel GPU) is not available'"
     - name: 'Test fbgemm-xpu'
       run: |
+        # Upstream FBGEMM tests (patched) cover shared operator behavior and parity.
+        # The tests below cover XPU/SYCL cases that upstream does not:
+        # launch-grid limits, device validation, and strided fast-path inputs.
         pytest -rsf torchlib-xpu/packages/fbgemm-xpu/tests/
     - name: 'Patch upstream FBGEMM tests'
       working-directory: fbgemm

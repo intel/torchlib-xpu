@@ -150,17 +150,12 @@ namespace fbgemm_xpu {
 
         int64_t adjusted_D = D;
 
-        {%- if dense %}
         // Match output dtype to dev_weights dtype for consistency
-        {%- endif %}
         output = at::empty({total_L, adjusted_D}, dev_weights.options().dtype(getScalarType(o_dtype))); // if nobag
 
         if (B == 0) {
             return output;
         }
-        {%- if not dense %}
-
-        {%- endif %}
 
         AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "batched_embedding_nobag_forward_kernel_1", [&] {
         DISPATCH_EMB_CACHE_OUTPUT_TYPES(

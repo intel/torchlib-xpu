@@ -22,6 +22,15 @@ class BlockedExtensionFinder(importlib.abc.MetaPathFinder):
 
 
 class TestExtensionLoading(unittest.TestCase):
+    def test_training_extension_registers_pt2_backward_wrapper(self) -> None:
+        self.assertTrue(
+            torch._C._dispatch_has_kernel_for_dispatch_key(
+                "fbgemm::split_embedding_nobag_backward_codegen_"
+                "rowwise_adagrad_unweighted_pt2_wrapper",
+                "XPU",
+            )
+        )
+
     def test_training_extension_registers_autograd_xpu(self) -> None:
         operators = (
             "fbgemm::dense_embedding_codegen_lookup_function",

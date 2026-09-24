@@ -3,7 +3,7 @@
 
 cmake_minimum_required(VERSION 3.18)
 project(${SKBUILD_PROJECT_NAME})
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(PYBIND11_FINDPYTHON ON)
@@ -77,7 +77,7 @@ function(make_torchcodec_xpu_libraries torchcodec_variant)
     python_add_library(${libname} MODULE WITH_SOABI ${sources})
     # Avoid adding the "lib" prefix which we already add explicitly.
     set_target_properties(${libname} PROPERTIES PREFIX "")
-    set_target_properties(${libname} PROPERTIES CXX_STANDARD 17)
+    set_target_properties(${libname} PROPERTIES CXX_STANDARD 20)
     target_include_directories(${libname}
         PRIVATE
         "${Python3_INCLUDE_DIRS}"

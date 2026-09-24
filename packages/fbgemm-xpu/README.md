@@ -93,7 +93,7 @@ For now, build from source:
 
 * Install [uv]
 
-* Install Intel oneAPI (DPC++ compiler `icpx`), version 2026.0
+* Install Intel oneAPI (DPC++ compiler `icpx`), version 2026.1
 
 * Clone the repository:
 
@@ -142,7 +142,7 @@ The lookup operators do not currently support:
 - global weight decay (GWD);
 - cache-backed lookup.
 
-The pristine FBGEMM 1.8.0 high-level training frontend does not expose
+The pristine FBGEMM 1.9.0 high-level training frontend does not expose
 `ComputeDevice.XPU`. Constructing
 `SplitTableBatchedEmbeddingBagsCodegen` for XPU is therefore unavailable in
 this release. The upstream high-level TBE tests therefore do not exercise these

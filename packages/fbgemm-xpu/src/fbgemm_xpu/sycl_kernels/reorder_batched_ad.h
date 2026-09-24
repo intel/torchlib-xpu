@@ -55,7 +55,6 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/xpu/XPUContext.h>
 #include <c10/xpu/XPUFunctions.h>
-#include <ATen/native/xpu/sycl/KernelUtils.h>
 #include <ATen/native/StridedRandomAccessor.h>
 #include <torch/library.h>
 

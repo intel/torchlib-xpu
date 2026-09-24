@@ -37,7 +37,7 @@ endif()
 
 Python3_add_library(_C MODULE WITH_SOABI ${all_sources})
 set_target_properties(_C PROPERTIES PREFIX "")
-set_target_properties(_C PROPERTIES CXX_STANDARD 17)
+set_target_properties(_C PROPERTIES CXX_STANDARD 20)
 
 # The package root is needed because host sources include
 # "fbgemm_utils/torch_library.h". sycl_kernels and fbgemm_utils are added so

@@ -351,6 +351,14 @@ class SplitNoBagLookupFunction_rowwise_adagrad_Op_pt2
         // nobag
         Tensor grad_weights_dev;
 
+        // FBGEMM 1.9 packs the public backward-wrapper weights and auxiliary
+        // tensors into lists. Keep owned vectors alive across the dispatcher
+        // call; the XPU wrapper unpacks them for the exact implementation.
+        const std::vector<Tensor> backward_weights = {
+            weights_dev, weights_placements, weights_offsets, weights_uvm,
+            weights_lxu_cache};
+        const std::vector<Tensor> aux_tensor_bwd = {lxu_cache_locations};
+
         static auto embedding_unweighted_backward_op =
             torch::Dispatcher::singleton()
                 .findSchemaOrThrow(
@@ -359,16 +367,12 @@ class SplitNoBagLookupFunction_rowwise_adagrad_Op_pt2
                     "")
                 .typed<Tensor(
                     const Tensor& /*grad_output*/,
-                    const Tensor& /*weights_host*/,
-                    const Tensor& /*weights_dev*/,
-                    const Tensor& /*weights_uvm*/,
-                    const Tensor& /*lxu_cache_weight*/,
-                    const Tensor& /*weights_placements*/,
-                    const Tensor& /*weights_offsets*/, const c10::SymInt /*D*/,
+                    const at::TensorList /*weights*/,
+                    const c10::SymInt /*D*/,
                     const Tensor& /*hash_size_cumsum*/,
                     const int64_t /*total_hash_size_bits*/,
                     const Tensor& /*indices*/, const Tensor& /*offsets*/,
-                    const Tensor& /*lxu_cache_locations*/,
+                    const at::TensorList /*aux_tensor_bwd*/,
                     const int64_t /*BT_block_size*/,
                     const int64_t /*max_segment_length_per_warp*/,
                     const bool /*stochastic_rounding*/,
@@ -380,10 +384,9 @@ class SplitNoBagLookupFunction_rowwise_adagrad_Op_pt2
                     double)>();
 
         grad_weights_dev = embedding_unweighted_backward_op.call(
-            grad_output, weights_host, weights_dev, weights_uvm,
-            weights_lxu_cache, weights_placements, weights_offsets, D,
-            hash_size_cumsum, total_hash_size_bits, indices, offsets,
-            lxu_cache_locations, BT_block_size, max_segment_length_per_warp,
+            grad_output, backward_weights, D, hash_size_cumsum,
+            total_hash_size_bits, indices, offsets, aux_tensor_bwd,
+            BT_block_size, max_segment_length_per_warp,
             stochastic_rounding, info_B_num_bits, info_B_mask_int64,
             use_uniq_cache_locations_bwd, use_homogeneous_placements,
             momentum1_host, momentum1_dev, momentum1_uvm, momentum1_placements,

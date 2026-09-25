@@ -6,13 +6,13 @@ Subject: [PATCH] Add XPU device recognition to the TBE frontend
 Recognize XPU in the Python TBE frontend without adding backend policy or
 changing the existing CPU, CUDA, and MTIA paths:
 
-- append XPU to ComputeDevice so existing enum values remain stable;
-- allow DEVICE placement and select XPU only when it is available after
+* add `XPU = 3` to ComputeDevice so existing enum values remain stable;
+* allow DEVICE placement and select XPU only when it is available after
   CUDA and MTIA;
-- avoid CUDA device queries when Split TBE selects XPU, and let Dense TBE
+* avoid CUDA device queries when Split TBE selects XPU, and let Dense TBE
   receive an explicit device;
-- select XPU in shared TBE utility allocation helpers;
-- add focused CPU-only tests for recognition, priority, and device-query
+* select XPU in shared TBE utility allocation helpers;
+* add focused CPU-only tests for recognition, priority, and device-query
   behavior.
 
 This patch only enables frontend device recognition. It does not add

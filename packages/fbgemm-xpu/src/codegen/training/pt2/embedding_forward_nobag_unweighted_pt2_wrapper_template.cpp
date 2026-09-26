@@ -28,8 +28,6 @@
 //   PT2 (PyTorch 2.0) compilation wrapper implementation for split embedding (nobag, unweighted).
 //   Uses PyTorch dispatcher to call the actual XPU kernel implementation.
 //   Controlled by the `is_forward` Jinja2 variable at codegen time.
-//   The backward public wrapper follows FBGEMM 1.9's list-packed weights and
-//   auxiliary-tensor schema, then unpacks it for the XPU exact implementation.
 //
 ////////////////////////////////////////////////////////////////////////////////
 

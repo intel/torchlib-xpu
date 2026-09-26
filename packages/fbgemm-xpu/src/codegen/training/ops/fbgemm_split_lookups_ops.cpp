@@ -351,9 +351,6 @@ class SplitNoBagLookupFunction_rowwise_adagrad_Op_pt2
         // nobag
         Tensor grad_weights_dev;
 
-        // FBGEMM 1.9 packs the public backward-wrapper weights and auxiliary
-        // tensors into lists. Keep owned vectors alive across the dispatcher
-        // call; the XPU wrapper unpacks them for the exact implementation.
         const std::vector<Tensor> backward_weights = {
             weights_dev, weights_placements, weights_offsets, weights_uvm,
             weights_lxu_cache};

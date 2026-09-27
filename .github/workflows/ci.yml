@@ -270,6 +270,7 @@ jobs:
     - name: 'Cleanup'
       run: |
         rm -rf .torchlib-xpu-venv
+        rm -rf _diagnostics
         rm -rf _wheels
         rm -rf _tools
     - name: 'Set AGENT_TOOLSDIRECTORY'
@@ -376,6 +377,7 @@ jobs:
         python -m venv .torchlib-xpu-venv
         echo "$GITHUB_WORKSPACE/.torchlib-xpu-venv/bin" >> $GITHUB_PATH
     - name: 'Set TorchCodec diagnostics artifact name'
+      shell: bash
       run: |
         raw="torchcodec-pytest-${{ matrix.image }}-py${{ matrix.python-version }}-${{ matrix.runner }}-ffmpeg-${{ matrix.ffmpeg-version }}-cpu-${CPU_FALLBACK}-forced-${FORCE_CPU_FALLBACK}-${PR_OR_SHA}-${UNIQUE_ID}"
         sanitized="${raw//:/-}"
@@ -430,6 +432,7 @@ jobs:
         LIBVA_DRIVER_NAME=iHD vainfo --display drm --device "$render_node" || true
     - name: 'Test'
       working-directory: torchcodec
+      shell: bash
       run: |
         set -o pipefail
         known_failures=""
@@ -437,8 +440,10 @@ jobs:
           # On dg2 see: https://github.com/intel/media-driver/issues/1954
           known_failures="not test_get_frame_at_av1[xpu]"
         fi
-        log="$RUNNER_TEMP/torchcodec-pytest.log"
-        junit="$RUNNER_TEMP/torchcodec-junit.xml"
+        diagnostics="$GITHUB_WORKSPACE/_diagnostics"
+        mkdir -p "$diagnostics"
+        log="$diagnostics/torchcodec-pytest.log"
+        junit="$diagnostics/torchcodec-junit.xml"
         set +e
         pytest -rsf --capture=no -k "${known_failures}" \
           --junitxml="$junit" test/ 2>&1 | tee "$log"
@@ -519,9 +524,7 @@ jobs:
       uses: actions/upload-artifact@v7
       with:
         name: ${{ env.DIAGNOSTIC_ARTIFACT }}
-        path: |
-          ${{ runner.temp }}/torchcodec-pytest.log
-          ${{ runner.temp }}/torchcodec-junit.xml
+        path: _diagnostics/
         if-no-files-found: warn
         retention-days: 14
 

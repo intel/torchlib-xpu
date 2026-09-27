@@ -319,6 +319,7 @@ jobs:
         rm -rf .git/rebase-apply
         git am ../torchlib-xpu/packages/torchcodec-xpu/patches/0001-Add-XPU-support-to-tests.patch
         git am ../torchlib-xpu/packages/torchcodec-xpu/patches/0002-Add-XPU-support-to-video-encoder-tests.patch
+        git am ../torchlib-xpu/packages/torchcodec-xpu/patches/0003-Handle-MP3-padding-in-audio-encoder-tests.patch
     - name: 'Install Intel drivers, FFmpeg and test prerequisites'
       run: |
         add-apt-repository -y ppa:kobuk-team/intel-graphics

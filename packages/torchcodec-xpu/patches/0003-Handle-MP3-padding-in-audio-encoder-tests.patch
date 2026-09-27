@@ -1,0 +1,85 @@
+From 2a34b806c90d2368bd8116756283a3803720a2f9 Mon Sep 17 00:00:00 2001
+From: Mateusz Krzemieniewski <mateusz.krzemieniewski@intel.com>
+Date: Sun, 27 Sep 2026 22:12:43 +0300
+Subject: [PATCH] Handle MP3 padding in audio encoder parity tests
+
+libmp3lame 3.101 can report up to one frame of leading or trailing
+padding differently between TorchCodec and the FFmpeg CLI. Keep
+validating the full decoded signal after aligning that bounded padding.
+
+Signed-off-by: Mateusz Krzemieniewski <mateusz.krzemieniewski@intel.com>
+---
+ test/test_encoders.py | 57 ++++++++++++++++++++++++++++++++++++++-----
+ 1 file changed, 51 insertions(+), 6 deletions(-)
+
+diff --git a/test/test_encoders.py b/test/test_encoders.py
+index 91ce859..3cdccc1 100644
+--- a/test/test_encoders.py
++++ b/test/test_encoders.py
+@@ -1219,12 +1219,57 @@ class TestEncoder:
+         else:
+             rtol, atol = None, None
+ 
+-        assert_close(
+-            samples_by_us.data,
+-            samples_by_ffmpeg.data,
+-            rtol=rtol,
+-            atol=atol,
+-        )
++        samples_by_us_data = samples_by_us.data
++        samples_by_ffmpeg_data = samples_by_ffmpeg.data
++        if samples_by_us_data.shape != samples_by_ffmpeg_data.shape:
++            # MP3 encoders may report different leading or trailing padding
++            # while preserving the same decoded signal. Accept less than one
++            # MP3 frame only when removing it makes every remaining sample
++            # pass the normal comparison below.
++            assert format == "mp3"
++            assert (
++                samples_by_us_data.shape[:-1] == samples_by_ffmpeg_data.shape[:-1]
++            )
++            num_padding_samples = abs(
++                samples_by_us_data.shape[-1] - samples_by_ffmpeg_data.shape[-1]
++            )
++            mp3_frame_size = 1_152 if sample_rate >= 32_000 else 576
++            assert 0 < num_padding_samples < mp3_frame_size
++
++            if samples_by_us_data.shape[-1] > samples_by_ffmpeg_data.shape[-1]:
++                longer, shorter = samples_by_us_data, samples_by_ffmpeg_data
++                longer_is_ours = True
++            else:
++                longer, shorter = samples_by_ffmpeg_data, samples_by_us_data
++                longer_is_ours = False
++
++            last_error = None
++            for aligned_longer in (
++                longer[..., num_padding_samples:],
++                longer[..., :-num_padding_samples],
++            ):
++                actual, expected = (
++                    (aligned_longer, shorter)
++                    if longer_is_ours
++                    else (shorter, aligned_longer)
++                )
++                try:
++                    assert_close(actual, expected, rtol=rtol, atol=atol)
++                    break
++                except AssertionError as error:
++                    last_error = error
++            else:
++                raise AssertionError(
++                    "MP3 padding differed, but neither leading nor trailing "
++                    "alignment produced equivalent decoded samples."
++                ) from last_error
++        else:
++            assert_close(
++                samples_by_us_data,
++                samples_by_ffmpeg_data,
++                rtol=rtol,
++                atol=atol,
++            )
+         assert samples_by_us.sample_rate == samples_by_ffmpeg.sample_rate
+ 
+         # On FFmpeg >= 9 the CLI encodes FLAC with a block size equal to the
+-- 
+2.43.0
+

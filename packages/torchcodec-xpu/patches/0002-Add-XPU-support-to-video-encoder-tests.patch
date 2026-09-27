@@ -24,7 +24,7 @@ explicitly before the test function returns. NVENC tolerates the empty
 flush; VAAPI does not.
 
 Depends on 0001-Add-XPU-support-to-tests.patch (defines the needs_xpu
-marker and imports torchcodec_xpu in test/utils.py).
+marker). The plugin is loaded through TorchCodec's device-backend entry point.
 
 Signed-off-by: Edgar Romo Montiel <edgar.romo.montiel@intel.com>
 ---

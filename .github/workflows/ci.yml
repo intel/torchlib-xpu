@@ -521,6 +521,7 @@ jobs:
         exit "$status"
     - name: 'Upload TorchCodec pytest diagnostics'
       if: ${{ always() }}
+      continue-on-error: true
       uses: actions/upload-artifact@v7
       with:
         name: ${{ env.DIAGNOSTIC_ARTIFACT }}

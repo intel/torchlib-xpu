@@ -1,0 +1,86 @@
+From 0a45a7d3d30d4686557c41bfc2b45bb920cd40c9 Mon Sep 17 00:00:00 2001
+From: Mateusz Krzemieniewski <mateusz.krzemieniewski@intel.com>
+Date: Mon, 28 Sep 2026 07:40:42 +0300
+Subject: [PATCH] Handle MP3 start-time offsets in frame parity tests
+
+When equivalent MP3 padding changes the first frame PTS, compare packet
+timing relative to each file's own origin while preserving exact checks
+for sample format, frame sizes, channels, and durations.
+
+Signed-off-by: Mateusz Krzemieniewski <mateusz.krzemieniewski@intel.com>
+---
+ test/test_encoders.py | 37 +++++++++++++++++++++++++++++++------
+ 1 file changed, 31 insertions(+), 6 deletions(-)
+
+diff --git a/test/test_encoders.py b/test/test_encoders.py
+index 3cdccc1..51add95 100644
+--- a/test/test_encoders.py
++++ b/test/test_encoders.py
+@@ -62,7 +62,9 @@ def with_ffmpeg_debug_logs():
+     os.environ["TORCHCODEC_FFMPEG_LOG_LEVEL"] = previous_log_level
+ 
+ 
+-def validate_frames_properties(*, actual: Path, expected: Path):
++def validate_frames_properties(
++    *, actual: Path, expected: Path, allow_start_time_offset: bool = False
++):
+     # actual and expected are files containing encoded audio data.  We call
+     # `ffprobe` on both, and assert that the frame properties match (pts,
+     # duration, etc.)
+@@ -117,9 +119,27 @@ def validate_frames_properties(*, actual: Path, expected: Path):
+                 # something like this. In any case, this doesn't seem to be
+                 # critical.
+                 continue
+-            assert (
+-                d_actual[prop] == d_expected[prop]
+-            ), f"\nComparing: {actual}\nagainst reference: {expected},\nthe {prop} property is different at frame {frame_index}:"
++            error_message = (
++                f"\nComparing: {actual}\nagainst reference: {expected},\n"
++                f"the {prop} property is different at frame {frame_index}:"
++            )
++            if allow_start_time_offset and prop == "pts":
++                actual_value = int(d_actual[prop]) - int(frames_actual[0][prop])
++                expected_value = int(d_expected[prop]) - int(frames_expected[0][prop])
++            elif allow_start_time_offset and prop == "pts_time":
++                actual_value = float(d_actual[prop]) - float(frames_actual[0][prop])
++                expected_value = float(d_expected[prop]) - float(
++                    frames_expected[0][prop]
++                )
++            else:
++                actual_value = d_actual[prop]
++                expected_value = d_expected[prop]
++            if allow_start_time_offset and prop == "pts_time":
++                assert actual_value == pytest.approx(
++                    expected_value, abs=1e-9
++                ), error_message
++            else:
++                assert actual_value == expected_value, error_message
+ 
+ 
+ class TestAudioEncoder:
+@@ -1221,7 +1241,10 @@ class TestEncoder:
+ 
+         samples_by_us_data = samples_by_us.data
+         samples_by_ffmpeg_data = samples_by_ffmpeg.data
+-        if samples_by_us_data.shape != samples_by_ffmpeg_data.shape:
++        mp3_padding_differs = (
++            samples_by_us_data.shape != samples_by_ffmpeg_data.shape
++        )
++        if mp3_padding_differs:
+             # MP3 encoders may report different leading or trailing padding
+             # while preserving the same decoded signal. Accept less than one
+             # MP3 frame only when removing it makes every remaining sample
+@@ -1281,7 +1304,9 @@ class TestEncoder:
+         cli_flac_block_size_differs = format == "flac" and ffmpeg_major_version >= 9
+         if method == "to_file" and not cli_flac_block_size_differs:
+             validate_frames_properties(
+-                actual=encoder_output, expected=encoded_by_ffmpeg
++                actual=encoder_output,
++                expected=encoded_by_ffmpeg,
++                allow_start_time_offset=mp3_padding_differs,
+             )
+ 
+     @pytest.mark.parametrize(
+-- 
+2.43.0
+

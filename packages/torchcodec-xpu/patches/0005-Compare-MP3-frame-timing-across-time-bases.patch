@@ -1,0 +1,54 @@
+From 33b4a020738aa5e01cc7f6bada77d68b34b452f1 Mon Sep 17 00:00:00 2001
+From: Mateusz Krzemieniewski <mateusz.krzemieniewski@intel.com>
+Date: Mon, 28 Sep 2026 11:10:27 +0300
+Subject: [PATCH] Compare MP3 frame timing across time bases
+
+Equivalent MP3 padding metadata can select different stream time bases.
+Compare the second-based timing fields while retaining exact frame-shape
+and format checks.
+
+Signed-off-by: Mateusz Krzemieniewski <mateusz.krzemieniewski@intel.com>
+---
+ test/test_encoders.py | 15 ++++++++++-----
+ 1 file changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/test/test_encoders.py b/test/test_encoders.py
+index 51add95..e6920d1 100644
+--- a/test/test_encoders.py
++++ b/test/test_encoders.py
+@@ -119,22 +119,27 @@ def validate_frames_properties(
+                 # something like this. In any case, this doesn't seem to be
+                 # critical.
+                 continue
++            if allow_start_time_offset and prop in ("pts", "duration"):
++                # Integer timestamps are expressed in each stream's time base,
++                # which may differ when equivalent MP3 padding metadata differs.
++                # The corresponding second-based properties are checked below.
++                continue
+             error_message = (
+                 f"\nComparing: {actual}\nagainst reference: {expected},\n"
+                 f"the {prop} property is different at frame {frame_index}:"
+             )
+-            if allow_start_time_offset and prop == "pts":
+-                actual_value = int(d_actual[prop]) - int(frames_actual[0][prop])
+-                expected_value = int(d_expected[prop]) - int(frames_expected[0][prop])
+-            elif allow_start_time_offset and prop == "pts_time":
++            if allow_start_time_offset and prop == "pts_time":
+                 actual_value = float(d_actual[prop]) - float(frames_actual[0][prop])
+                 expected_value = float(d_expected[prop]) - float(
+                     frames_expected[0][prop]
+                 )
++            elif allow_start_time_offset and prop == "duration_time":
++                actual_value = float(d_actual[prop])
++                expected_value = float(d_expected[prop])
+             else:
+                 actual_value = d_actual[prop]
+                 expected_value = d_expected[prop]
+-            if allow_start_time_offset and prop == "pts_time":
++            if allow_start_time_offset and prop in ("pts_time", "duration_time"):
+                 assert actual_value == pytest.approx(
+                     expected_value, abs=1e-9
+                 ), error_message
+-- 
+2.43.0
+

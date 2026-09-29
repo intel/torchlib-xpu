@@ -18,6 +18,15 @@ enum ArgIndex_aux_tensor {
     AUX_TENSOR_SIZE = 7
 };
 
+enum ArgIndex_aux_tensor_bwd {
+    IDX_BWD_LXU_CACHE_LOCATIONS = 0,
+    IDX_BWD_B_OFFSETS = 1,
+    IDX_BWD_VBE_ROW_OUTPUT_OFFSETS = 2,
+    IDX_BWD_VBE_B_T_MAP = 3,
+    IDX_BWD_VBE_B_OFFSETS_RANK_PER_FEATURE = 4,
+    AUX_TENSOR_BWD_SIZE = 5
+};
+
 enum ArgIndex_aux_bool {
     IDX_IS_EXPERIMENTAL_TBE = 0,
     IDX_USE_UNIQ_CACHE_LOCATIONS_BWD = 1,

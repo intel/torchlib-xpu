@@ -31,6 +31,8 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+#include "fbgemm_utils/pt2_arg_utils.h"
+
 #include <torch/all.h>
 #include <torch/library.h>
 #include <ATen/ATen.h>
@@ -152,7 +154,8 @@ namespace fbgemm_xpu {
             "aux_tensor_bwd must contain lxu_cache_locations, got ",
             aux_tensor_bwd.size(),
             " tensors");
-        const auto& lxu_cache_locations = aux_tensor_bwd[0];
+        const auto& lxu_cache_locations =
+            aux_tensor_bwd[IDX_BWD_LXU_CACHE_LOCATIONS];
 
         static auto op =
             torch::Dispatcher::singleton()

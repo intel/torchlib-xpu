@@ -108,9 +108,6 @@ Use the following compatibility table when self-building the project and its dep
 | 2.9     | 0.24        | [2025.2][2-9]  |
 | 2.8     | 0.23        | [2025.1][2-8]  |
 
-PyTorch 2.14 headers require C++20. Keep both plugin CMake projects and their
-native targets on C++20 when building against this stack.
-
 [TorchCodec]: https://github.com/meta-pytorch/torchcodec
 
 [2-14]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-14.html

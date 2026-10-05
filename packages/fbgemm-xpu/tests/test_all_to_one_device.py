@@ -34,11 +34,11 @@ def test_same_device_preserves_views_and_empty_tensors():
         torch.ones((), device=xpu),
     ]
     outputs = torch.ops.fbgemm.all_to_one_device(tensors, xpu)
-    assert len(outputs) == len(tensors)
+    assert len(outputs) == len(tensors)  # nosec B101
     for actual, expected in zip(outputs, tensors):
         torch.testing.assert_close(actual, expected)
-        assert actual.data_ptr() == expected.data_ptr()
-        assert actual.stride() == expected.stride()
+        assert actual.data_ptr() == expected.data_ptr()  # nosec B101
+        assert actual.stride() == expected.stride()  # nosec B101
 
 
 @pytest.mark.parametrize("pitched", [False, True])
@@ -61,12 +61,12 @@ def test_inputs_spread_over_visible_devices(num_inputs, pitched):
             for index, storage in enumerate(storages)
         ]
         outputs = torch.ops.fbgemm.all_to_one_device(inputs, target)
-        assert len(outputs) == len(inputs)
+        assert len(outputs) == len(inputs)  # nosec B101
         for source, actual, reference in zip(inputs, outputs, expected):
-            assert actual.device == target
+            assert actual.device == target  # nosec B101
             if source.device == target:
-                assert actual.data_ptr() == source.data_ptr()
-                assert actual.stride() == source.stride()
+                assert actual.data_ptr() == source.data_ptr()  # nosec B101
+                assert actual.stride() == source.stride()  # nosec B101
             torch.testing.assert_close(actual.cpu(), reference)
 
 
@@ -108,5 +108,5 @@ def test_cross_device_stream_copy_and_lifetime():
             torch.empty((0, 4)),
         ]
         for actual, reference in zip(consumed, expected):
-            assert actual.device == target
+            assert actual.device == target  # nosec B101
             torch.testing.assert_close(actual.cpu(), reference)

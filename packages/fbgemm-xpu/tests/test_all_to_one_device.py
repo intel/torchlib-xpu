@@ -6,6 +6,7 @@
 TorchRec's ``SeqEmbeddingsAllToOne`` gathers per-rank sequence embedding
 outputs onto one device with this operator. Tensors already on the target must
 come back as the same views, as on CUDA; the others are copied to the target.
+Tests use as many XPU devices as are visible; only the stream test needs two.
 """
 
 import fbgemm_xpu  # noqa: F401  - registers the fbgemm XPU operators
@@ -38,6 +39,35 @@ def test_same_device_preserves_views_and_empty_tensors():
         torch.testing.assert_close(actual, expected)
         assert actual.data_ptr() == expected.data_ptr()
         assert actual.stride() == expected.stride()
+
+
+@pytest.mark.parametrize("pitched", [False, True])
+@pytest.mark.parametrize("num_inputs", [1, 3, 10])
+def test_inputs_spread_over_visible_devices(num_inputs, pitched):
+    """Inputs round-robin over every visible XPU, gathered onto each one in
+    turn, as in FBGEMM's ``test_all_to_one_device``. With one device every
+    input is already on the target and must come back as the same view."""
+    generator = torch.Generator().manual_seed(num_inputs)
+    storages = [
+        torch.randn((10, 64 if pitched else 20), generator=generator)
+        for _ in range(num_inputs)
+    ]
+    expected = [storage[:, :20] for storage in storages]
+    count = torch.xpu.device_count()
+    for target_index in range(count):
+        target = torch.device(f"xpu:{target_index}")
+        inputs = [
+            storage.to(f"xpu:{index % count}")[:, :20]
+            for index, storage in enumerate(storages)
+        ]
+        outputs = torch.ops.fbgemm.all_to_one_device(inputs, target)
+        assert len(outputs) == len(inputs)
+        for source, actual, reference in zip(inputs, outputs, expected):
+            assert actual.device == target
+            if source.device == target:
+                assert actual.data_ptr() == source.data_ptr()
+                assert actual.stride() == source.stride()
+            torch.testing.assert_close(actual.cpu(), reference)
 
 
 def test_rejects_unsupported_device_inputs():

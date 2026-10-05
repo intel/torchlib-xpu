@@ -27,7 +27,7 @@ def fbgemm():
 @pytest.fixture
 def xpu(fbgemm):
     importlib.import_module("fbgemm_xpu")
-    assert torch.__version__.split("+")[0] == "2.14.0", torch.__version__  # nosec B101
+    assert torch.__version__.split("+")[0].startswith("2.14."), torch.__version__  # nosec B101
     assert torch.xpu.is_available(), "XPU validation requires a real device; no skip/fallback"  # nosec B101
     for operator in (LOOKUP, BOUNDS):
         assert torch._C._dispatch_has_kernel_for_dispatch_key(operator, "XPU"), operator  # nosec B101

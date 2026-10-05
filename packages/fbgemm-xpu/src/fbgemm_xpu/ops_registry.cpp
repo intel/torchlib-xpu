@@ -47,6 +47,9 @@ PyObject* PyInit__C(void) {
  * respective .cpp / .cu files.
  */
 TORCH_LIBRARY_FRAGMENT(fbgemm, m) {
+    if (!utils::torch::schemaExists("fbgemm::all_to_one_device")) {
+        m.def("all_to_one_device(Tensor[] input_tensors, Device target_device) -> Tensor[]");
+    }
     if (!utils::torch::schemaExists(
             "fbgemm::int_nbit_split_embedding_codegen_lookup_function")) {
         m.def(

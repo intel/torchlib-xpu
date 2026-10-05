@@ -79,6 +79,7 @@ operators alongside the operators above. You can find their exact signature in
 - `populate_bucketized_permute`
 - `reorder_batched_ad_indices`
 - `reorder_batched_ad_lengths`
+- `all_to_one_device`
 
 ## Supported hardware
 
@@ -153,6 +154,10 @@ FBGEMM tests cover the existing non-lookup operators.
 
 `bounds_check_indices` implements version 1 only. Version 2 and
 `prefetch_pipeline=True` are not implemented on XPU.
+
+`all_to_one_device` copies between XPU devices of one process. The pooled
+merge operators (`merge_pooled_embeddings`, `sum_reduce_to_one`) are not
+implemented on XPU.
 
 [FBGEMM]: https://github.com/pytorch/FBGEMM
 [uv]: https://github.com/astral-sh/uv

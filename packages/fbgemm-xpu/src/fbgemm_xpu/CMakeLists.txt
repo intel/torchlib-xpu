@@ -4,6 +4,7 @@
 # integrated.
 # --------------------------------------------------------------------------
 set(host_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/all_to_one_device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ops_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sparse_async_cumsum.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/split_embeddings_utils_xpu.cpp

@@ -30,6 +30,7 @@
 #include <ATen/Dispatch.h>
 
 #include "jagged_index_select_2d.h"
+#include "fbgemm_utils/utils.h"
 
 namespace fbgemm_xpu {
 
@@ -145,6 +146,7 @@ at::Tensor jagged_index_select_2d_forward_xpu(
     TORCH_CHECK(indices.is_xpu(), "indices must be an XPU tensor");
     TORCH_CHECK(input_offsets.is_xpu(), "input_offsets must be an XPU tensor");
     TORCH_CHECK(output_offsets.is_xpu(), "output_offsets must be an XPU tensor");
+    SYCL_DEVICE_GUARD(values);
 
     TORCH_CHECK(values.dim() == 2, "values must be a 2D tensor");
     TORCH_CHECK(indices.dim() == 1, "indices must be a 1D tensor");

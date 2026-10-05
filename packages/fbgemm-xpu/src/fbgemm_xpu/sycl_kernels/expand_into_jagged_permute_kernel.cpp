@@ -22,6 +22,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "expand_into_jagged_permute_kernel.h"
+#include "fbgemm_utils/utils.h"
 
 namespace fbgemm_xpu {
 
@@ -95,6 +96,7 @@ at::Tensor expand_into_jagged_permute_xpu(
         input_offsets.device(),
         ", and output_offsets on ",
         output_offsets.device());
+    SYCL_DEVICE_GUARD(permute);
 
     // Input validation (mirrors the CUDA TORCH_CHECKs).
     TORCH_CHECK(permute.numel() > 0);

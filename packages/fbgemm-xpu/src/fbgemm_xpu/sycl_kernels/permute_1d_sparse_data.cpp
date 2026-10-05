@@ -56,6 +56,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "permute_1d_sparse_data.h"
+#include "fbgemm_utils/utils.h"
 #include "sparse_async_cumsum.h"
 
 namespace fbgemm_xpu {
@@ -174,6 +175,8 @@ permute_1D_sparse_data_xpu(
     TORCH_CHECK(lengths.dim() == 1, "lengths must be 1D");
     TORCH_CHECK(indices.dim() == 1, "indices must be 1D");
     TORCH_CHECK(permute.dtype() == at::kInt, "permute must be int32");
+
+    SYCL_DEVICE_GUARD(indices);
 
     // Ensure contiguous
     const auto permute_contig = permute.contiguous();

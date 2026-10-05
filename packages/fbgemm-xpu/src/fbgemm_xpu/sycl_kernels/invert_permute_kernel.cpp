@@ -5,6 +5,7 @@
  */
 
 #include "invert_permute_kernel.h"
+#include "fbgemm_utils/utils.h"
 
 namespace fbgemm_xpu {
 
@@ -35,6 +36,7 @@ at::Tensor invert_permute_forward_xpu(const at::Tensor& permute) {
                 "invert_permute: input must be int32 or int64, got ", permute.dtype());
     TORCH_INTERNAL_ASSERT(permute.device().type() == at::DeviceType::XPU,
                          "invert_permute_forward_xpu: input must be on XPU device");
+    SYCL_DEVICE_GUARD(permute);
     
     // Get input size
     const int64_t N = permute.size(0);

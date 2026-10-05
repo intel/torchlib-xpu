@@ -41,6 +41,8 @@
 #include <torch/all.h>
 #include <torch/library.h>
 
+#include "fbgemm_utils/utils.h"
+
 // FBGEMM dispatch macros (not available in all environments; define inline)
 #ifndef FBGEMM_DISPATCH_FLOAT_AND_DOUBLE_CASE
 #define FBGEMM_DISPATCH_FLOAT_AND_DOUBLE_CASE(...)     \
@@ -613,6 +615,8 @@ _block_bucketize_sparse_features_xpu(
         lengths.device().type() == at::DeviceType::XPU,
         "block_bucketize_sparse_features_xpu: lengths must be on XPU");
 
+    SYCL_DEVICE_GUARD(lengths);
+
     if (total_num_blocks.has_value() &&
             (!block_bucketize_pos.has_value() || block_bucketize_pos.value().empty())) {
         // divisibility check runs on CPU scalars
@@ -1081,6 +1085,7 @@ static at::Tensor populate_bucketized_permute_xpu(
         const at::Tensor& lengths,
         const at::Tensor& bucketized_lengths,
         const at::Tensor& bucket_mapping) {
+    SYCL_DEVICE_GUARD(lengths);
     const auto lengths_contig = lengths.expect_contiguous();
     const auto bucketized_lengths_contig = bucketized_lengths.expect_contiguous();
     const auto bucket_mapping_contig = bucket_mapping.expect_contiguous();

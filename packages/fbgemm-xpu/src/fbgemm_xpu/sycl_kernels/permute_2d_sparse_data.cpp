@@ -31,6 +31,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "permute_2d_sparse_data.h"
+#include "fbgemm_utils/utils.h"
 #include "sparse_async_cumsum.h"
 
 namespace fbgemm_xpu {
@@ -147,6 +148,8 @@ permute_2D_sparse_preallocated_out_xpu(
     TORCH_CHECK(lengths.dim() == 2, "lengths must be 2D");
     TORCH_CHECK(indices.dim() == 1, "indices must be 1D");
     TORCH_CHECK(permute.dtype() == at::kInt, "permute must be int32");
+
+    SYCL_DEVICE_GUARD(indices);
 
     const auto permute_contig = permute.contiguous();
     const auto lengths_contig = lengths.contiguous();

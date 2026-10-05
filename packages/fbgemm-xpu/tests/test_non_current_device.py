@@ -49,11 +49,11 @@ def _late(tensors, device):
 
 def _assert_same(actual, expected):
     if isinstance(expected, (list, tuple)):
-        assert len(actual) == len(expected)
+        assert len(actual) == len(expected)  # nosec B101
         for actual_item, expected_item in zip(actual, expected):
             _assert_same(actual_item, expected_item)
     elif expected is None:
-        assert actual is None
+        assert actual is None  # nosec B101
     else:
         torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=0)
 
@@ -65,7 +65,7 @@ def _run(operator, inputs, devices, *args):
         actual = operator(*_late(inputs, data), *args)
         torch.xpu.synchronize(data)
         torch.xpu.synchronize(current)
-        assert torch.xpu.current_device() == current.index
+        assert torch.xpu.current_device() == current.index  # nosec B101
         _assert_same(actual, expected)
 
 

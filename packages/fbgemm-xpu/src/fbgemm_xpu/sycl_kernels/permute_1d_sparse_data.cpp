@@ -56,6 +56,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "permute_1d_sparse_data.h"
+#include "fbgemm_utils/tensor_utils.h"
 #include "fbgemm_utils/utils.h"
 #include "sparse_async_cumsum.h"
 
@@ -162,13 +163,8 @@ permute_1D_sparse_data_xpu(
     const std::optional<at::Tensor>& weights,
     const std::optional<int64_t>& permuted_lengths_sum) {
 
-    // Device validation
-    TORCH_INTERNAL_ASSERT(permute.device().type() == at::DeviceType::XPU,
-                         "permute must be on XPU device");
-    TORCH_INTERNAL_ASSERT(lengths.device().type() == at::DeviceType::XPU,
-                         "lengths must be on XPU device");
-    TORCH_INTERNAL_ASSERT(indices.device().type() == at::DeviceType::XPU,
-                         "indices must be on XPU device");
+    TENSORS_ON_SAME_SYCL_XPU_IF_NOT_OPTIONAL(
+        permute, lengths, indices, weights);
 
     // Input validation
     TORCH_CHECK(permute.dim() == 1, "permute must be 1D");

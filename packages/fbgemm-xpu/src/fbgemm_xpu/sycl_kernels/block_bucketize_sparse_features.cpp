@@ -41,6 +41,7 @@
 #include <torch/all.h>
 #include <torch/library.h>
 
+#include "fbgemm_utils/tensor_utils.h"
 #include "fbgemm_utils/utils.h"
 
 // FBGEMM dispatch macros (not available in all environments; define inline)
@@ -611,9 +612,7 @@ _block_bucketize_sparse_features_xpu(
         const bool keep_orig_idx,
         const std::optional<at::Tensor>& keep_orig_idx_per_feature) {
 
-    TORCH_INTERNAL_ASSERT(
-        lengths.device().type() == at::DeviceType::XPU,
-        "block_bucketize_sparse_features_xpu: lengths must be on XPU");
+    TENSORS_ON_SAME_SYCL_XPU_IF_NOT_OPTIONAL(lengths, indices);
 
     SYCL_DEVICE_GUARD(lengths);
 
@@ -1085,6 +1084,8 @@ static at::Tensor populate_bucketized_permute_xpu(
         const at::Tensor& lengths,
         const at::Tensor& bucketized_lengths,
         const at::Tensor& bucket_mapping) {
+    TENSORS_ON_SAME_SYCL_XPU_IF_NOT_OPTIONAL(
+        lengths, bucketized_lengths, bucket_mapping);
     SYCL_DEVICE_GUARD(lengths);
     const auto lengths_contig = lengths.expect_contiguous();
     const auto bucketized_lengths_contig = bucketized_lengths.expect_contiguous();

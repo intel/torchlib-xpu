@@ -25,6 +25,7 @@ pytestmark = [
 ]
 
 ITERATIONS = 5
+SAME_DEVICE_ERROR = "Not all tensors were on the same XPU"
 
 
 @pytest.fixture
@@ -155,3 +156,72 @@ def test_jagged_index_select_2d_forward(devices):
         devices,
         int(output_offsets[-1]),
     )
+
+
+def test_block_bucketize_rejects_mixed_devices(devices):
+    current, data = devices
+    lengths, indices = _sparse_features()
+    lengths = lengths.to(data)
+    indices = indices.to(current)
+    block_sizes = torch.full((3,), 250, dtype=torch.int32, device=data)
+
+    with pytest.raises(RuntimeError, match=SAME_DEVICE_ERROR):
+        torch.ops.fbgemm.block_bucketize_sparse_features_inference(
+            lengths,
+            indices,
+            False,
+            True,
+            block_sizes,
+            4,
+            None,
+            return_bucket_mapping=True,
+        )
+
+
+def test_populate_bucketized_permute_rejects_mixed_devices(devices):
+    current, data = devices
+    lengths = torch.tensor([1, 2, 0], dtype=torch.int32, device=data)
+    bucketized_lengths = torch.zeros(12, dtype=torch.int32, device=current)
+    bucket_mapping = torch.zeros(3, dtype=torch.int32, device=data)
+
+    with pytest.raises(RuntimeError, match=SAME_DEVICE_ERROR):
+        torch.ops.fbgemm.populate_bucketized_permute(
+            lengths, bucketized_lengths, bucket_mapping
+        )
+
+
+@pytest.mark.parametrize("name", ["permute_2D_sparse_data", "permute_1D_sparse_data"])
+@pytest.mark.parametrize("mismatch", ["required", "optional_weights"])
+def test_permute_sparse_data_rejects_mixed_devices(devices, name, mismatch):
+    current, data = devices
+    lengths, indices = _sparse_features()
+    if name == "permute_2D_sparse_data":
+        lengths = lengths.view(3, 4)
+        permute = torch.tensor([2, 0, 1], dtype=torch.int32)
+    else:
+        permute = torch.randperm(
+            12, generator=torch.Generator().manual_seed(1)
+        ).int()
+
+    permute = permute.to(current if mismatch == "required" else data)
+    lengths = lengths.to(data)
+    indices = indices.to(data)
+    weights = torch.randn(indices.numel(), device=current)
+    if mismatch == "required":
+        weights = weights.to(data)
+
+    with pytest.raises(RuntimeError, match=SAME_DEVICE_ERROR):
+        getattr(torch.ops.fbgemm, name)(permute, lengths, indices, weights)
+
+
+def test_jagged_index_select_rejects_mixed_devices(devices):
+    current, data = devices
+    values = torch.randn((4, 8), device=data)
+    indices = torch.tensor([0], dtype=torch.int64, device=current)
+    input_offsets = torch.tensor([4], dtype=torch.int64, device=data)
+    output_offsets = torch.tensor([4], dtype=torch.int64, device=data)
+
+    with pytest.raises(RuntimeError, match=SAME_DEVICE_ERROR):
+        torch.ops.fbgemm.jagged_index_select_2d_forward(
+            values, indices, input_offsets, output_offsets, 4
+        )

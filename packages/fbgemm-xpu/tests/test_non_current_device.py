@@ -35,15 +35,20 @@ def devices():
 
 
 def _late(tensors, device):
-    """Copy tensors to device so that they become valid only after slow work there."""
+    """Return copies on device that become valid only after slow work there.
+
+    The copies from the CPU block, so they are made before the slow work is
+    queued; made after it, they would wait for it and leave nothing pending.
+    """
+    on_device = [tensor.to(device) if tensor is not None else None for tensor in tensors]
     weight = torch.randn((2048, 2048), device=device)
     slow = weight
     for _ in range(8):
         slow = slow @ weight
     zero = slow[0, 0] * 0
     return [
-        tensor.to(device) + zero.to(tensor.dtype) if tensor is not None else None
-        for tensor in tensors
+        tensor + zero.to(tensor.dtype) if tensor is not None else None
+        for tensor in on_device
     ]
 
 

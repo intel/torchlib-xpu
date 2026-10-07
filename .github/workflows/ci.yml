@@ -498,6 +498,7 @@ jobs:
         pytest -rsf fbgemm_gpu/test/jagged/2d_to_dense_test.py
         pytest -rsf fbgemm_gpu/test/jagged/1d_to_dense_test.py
         pytest -rsf fbgemm_gpu/test/jagged/elementwise_binary_test.py
+        pytest -rsf fbgemm_gpu/test/merge_pooled_embeddings_test.py
         pytest -rsf fbgemm_gpu/test/sparse/block_bucketize_test.py
         pytest -rsf fbgemm_gpu/test/sparse/cumsum_test.py
         pytest -rsf fbgemm_gpu/test/sparse/misc_ops_test.py

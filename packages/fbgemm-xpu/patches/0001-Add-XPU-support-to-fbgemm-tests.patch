@@ -1,4 +1,4 @@
-From a3f79329fc193afe34ce69feb1b6690b07aaf618 Mon Sep 17 00:00:00 2001
+From 0c0d29b0926c2c93b8564441b1e1040684d71f3a Mon Sep 17 00:00:00 2001
 From: Alberto Gallegos <alberto.gallegos.muro@intel.com>
 Date: Thu, 9 Jul 2026 18:28:28 +0000
 Subject: [PATCH] Add XPU support to FBGEMM sparse ops and jagged tensor tests
@@ -55,8 +55,15 @@ add_jagged_output rather than skipping the tests. All three then run and keep
 covering the implemented operator, including the vectorized Half fast path and the
 torch.compile dynamic-shape path.
 
+Enable test_all_to_one_device in merge_pooled_embeddings_test.py on the
+current accelerator through the shared accelerator helpers. The class-level
+gpu_unavailable skip moves to the individual tests, so the remaining tests,
+which cover merge_pooled_embeddings and sum_reduce_to_one (no XPU
+implementation), keep running on CUDA and skip automatically on XPU.
+
 Signed-off-by: Alberto Gallegos <alberto.gallegos.muro@intel.com>
 Signed-off-by: Felipe Leza Alvarez <felipe.leza.alvarez@intel.com>
+Signed-off-by: mkrze <mateusz.krzemieniewski@intel.com>
 
 Co-authored-by: Felipe Leza Alvarez <felipe.leza.alvarez@intel.com>
 ---
@@ -67,6 +74,7 @@ Co-authored-by: Felipe Leza Alvarez <felipe.leza.alvarez@intel.com>
  .../test/jagged/elementwise_binary_test.py    |  19 +-
  .../jagged/expand_into_jagged_permute_test.py |  29 +--
  .../jagged/jagged_index_select_2d_test.py     |  28 ++-
+ .../test/merge_pooled_embeddings_test.py      |  31 +++-
  .../test/sparse/block_bucketize_test.py       | 172 ++++++++++--------
  fbgemm_gpu/test/sparse/cumsum_test.py         |   4 +
  fbgemm_gpu/test/sparse/misc_ops_test.py       |  24 ++-
@@ -75,7 +83,7 @@ Co-authored-by: Felipe Leza Alvarez <felipe.leza.alvarez@intel.com>
  .../tbe/utils/generate_vbe_metadata_test.py   |  23 ++-
  .../tbe/utils/split_embeddings_utils_test.py  |  33 +++-
  fbgemm_gpu/test/test_utils.py                 |  52 +++++-
- 15 files changed, 368 insertions(+), 166 deletions(-)
+ 16 files changed, 392 insertions(+), 173 deletions(-)
 
 diff --git a/fbgemm_gpu/test/jagged/1d_to_dense_test.py b/fbgemm_gpu/test/jagged/1d_to_dense_test.py
 index 387ee1010..9ceb293fb 100644
@@ -509,6 +517,129 @@ index 2e28863ad..4cd048eb0 100644
          is_float = jagged_tensor_dtype in [torch.float, torch.half, torch.bfloat16]
          lengths = torch.randint(
              low=0,
+diff --git a/fbgemm_gpu/test/merge_pooled_embeddings_test.py b/fbgemm_gpu/test/merge_pooled_embeddings_test.py
+index f0db0e65b..4326f4d83 100644
+--- a/fbgemm_gpu/test/merge_pooled_embeddings_test.py
++++ b/fbgemm_gpu/test/merge_pooled_embeddings_test.py
+@@ -21,14 +21,22 @@ open_source: bool = getattr(fbgemm_gpu, "open_source", False)
+ 
+ if open_source:
+     # pyre-ignore[21]
+-    from test_utils import gpu_unavailable
++    from test_utils import accelerator_unavailable, current_accelerator, gpu_unavailable
+ else:
+     import fbgemm_gpu.sparse_ops  # noqa: F401, E402
+-    from fbgemm_gpu.test.test_utils import gpu_unavailable
++    from fbgemm_gpu.test.test_utils import (
++        accelerator_unavailable,
++        current_accelerator,
++        gpu_unavailable,
++    )
+ 
+     torch.ops.load_library("//deeplearning/fbgemm/fbgemm_gpu:merge_pooled_embeddings")
+ 
++# Registers the XPU (Intel GPU) FBGEMM operator implementations.
++import fbgemm_xpu  # noqa: F401, E402
++
+ typed_gpu_unavailable: tuple[bool, str] = gpu_unavailable
++typed_accelerator_unavailable: tuple[bool, str] = accelerator_unavailable
+ 
+ 
+ def make_pitched_tensor(
+@@ -53,11 +61,11 @@ def make_pitched_tensor(
+ 
+ 
+ # @unittest.skipIf(open_source, "Not supported in open source yet")
+-@unittest.skipIf(*typed_gpu_unavailable)
+ class MergePooledEmbeddingsTest(unittest.TestCase):
+     # pyre-fixme[56]: Pyre was not able to infer the type of argument
+     #  `hypothesis.strategies.integers($parameter$min_value = 1, $parameter$max_value =
+     #  10)` to decorator factory `hypothesis.given`.
++    @unittest.skipIf(*typed_gpu_unavailable)
+     @given(
+         num_ads=st.integers(min_value=1, max_value=10),
+         embedding_dimension=st.integers(min_value=1, max_value=32),
+@@ -126,9 +134,10 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
+         torch.testing.assert_close(output_ref, output_cpu)
+ 
+     # pyre-fixme[56]: Pyre was not able to infer the type of argument
++    @unittest.skipIf(*typed_accelerator_unavailable)
+     @given(
+         num_inputs=st.integers(min_value=1, max_value=10),
+-        num_gpus=st.integers(min_value=1, max_value=torch.cuda.device_count()),
++        num_gpus=st.integers(min_value=1, max_value=torch.accelerator.device_count()),
+         r=st.randoms(use_true_random=False),
+         use_pitched=st.booleans(),
+     )
+@@ -142,8 +151,9 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
+         r,
+         use_pitched: bool,
+     ) -> None:
+-        dst_device = torch.device(f"cuda:{r.randint(0, num_gpus - 1)}")
+-        with torch.cuda.device(dst_device):
++        device_type = current_accelerator().type
++        dst_device = torch.device(device_type, r.randint(0, num_gpus - 1))
++        with torch.accelerator.device_index(dst_device.index):
+             if use_pitched:
+                 inputs = [
+                     make_pitched_tensor(10, 20, torch.float32, "cpu", alignment=256)
+@@ -153,13 +163,15 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
+                 inputs = [torch.randn(10, 20) for _ in range(num_inputs)]
+ 
+             cuda_inputs = [
+-                input.to(f"cuda:{i % num_gpus}") for i, input in enumerate(inputs)
++                input.to(torch.device(device_type, i % num_gpus))
++                for i, input in enumerate(inputs)
+             ]
+             cuda_outputs = torch.ops.fbgemm.all_to_one_device(cuda_inputs, dst_device)
+             for i, o in zip(inputs, cuda_outputs):
+                 self.assertEqual(o.device, dst_device)
+                 torch.testing.assert_close(o.cpu(), i)
+ 
++    @unittest.skipIf(*typed_gpu_unavailable)
+     def test_merge_pooled_embeddings_gpu_to_cpu(self) -> None:
+         dst_device = torch.device("cpu")
+         inputs = [torch.randn(10, 20) for _ in range(4)]
+@@ -174,6 +186,7 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
+         torch.testing.assert_close(output, ref_output)
+ 
+     # pyre-fixme[56]: Pyre was not able to infer the type of argument
++    @unittest.skipIf(*typed_gpu_unavailable)
+     @given(
+         num_inputs=st.integers(min_value=1, max_value=8),
+         num_gpus=st.integers(min_value=1, max_value=torch.cuda.device_count()),
+@@ -213,6 +226,7 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
+             )
+         torch.testing.assert_close(output, ref_output)
+ 
++    @unittest.skipIf(*typed_gpu_unavailable)
+     def test_merge_pooled_embeddings_cpu_with_different_target_device(self) -> None:
+         uncat_size = 2
+         pooled_embeddings = [torch.ones(uncat_size, 4), torch.ones(uncat_size, 8)]
+@@ -228,6 +242,7 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
+     # pyre-fixme[56]: Pyre was not able to infer the type of argument
+     #  `hypothesis.strategies.integers($parameter$min_value = 1, $parameter$max_value =
+     #  10)` to decorator factory `hypothesis.given`.
++    @unittest.skipIf(*typed_gpu_unavailable)
+     @given(
+         num_inputs=st.integers(min_value=1, max_value=10),
+         num_gpus=st.integers(min_value=1, max_value=torch.cuda.device_count()),
+@@ -256,6 +271,7 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
+                 cuda_output.cpu(), torch.stack(inputs).sum(dim=0)
+             )
+ 
++    @unittest.skipIf(*typed_gpu_unavailable)
+     def test_merge_pooled_embeddings_meta(self) -> None:
+         """
+         Test that merge_pooled_embeddings works with meta tensor and
+@@ -286,6 +302,7 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
+ 
+         assert output_meta.shape == output_cpu.shape
+ 
++    @unittest.skipIf(*typed_gpu_unavailable)
+     def test_merge_pooled_embeddings_empty_input_tensors(self) -> None:
+         uncat_size = 2
+         pooled_embeddings = [
 diff --git a/fbgemm_gpu/test/sparse/block_bucketize_test.py b/fbgemm_gpu/test/sparse/block_bucketize_test.py
 index e7c9837bf..f7857d68b 100644
 --- a/fbgemm_gpu/test/sparse/block_bucketize_test.py

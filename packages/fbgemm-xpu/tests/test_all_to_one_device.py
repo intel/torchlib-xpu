@@ -4,9 +4,12 @@
 """``all_to_one_device`` on XPU.
 
 TorchRec's ``SeqEmbeddingsAllToOne`` gathers per-rank sequence embedding
-outputs onto one device with this operator. Tensors already on the target must
-come back as the same views, as on CUDA; the others are copied to the target.
-Tests use as many XPU devices as are visible; the cross-device tests need two.
+outputs onto one device with this operator. FBGEMM's patched
+``test_all_to_one_device`` checks the gathered values for inputs spread over
+devices. These tests cover what it does not check: tensors already on the
+target come back as the same views, copies are contiguous, invalid devices are
+rejected, and copies work on non-default streams. The cross-device tests need
+two XPU devices.
 """
 
 import fbgemm_xpu  # noqa: F401  - registers the fbgemm XPU operators
@@ -41,35 +44,6 @@ def test_same_device_preserves_views_and_empty_tensors():
         assert actual.stride() == expected.stride()  # nosec B101
 
 
-@pytest.mark.parametrize("pitched", [False, True])
-@pytest.mark.parametrize("num_inputs", [1, 3, 10])
-def test_inputs_spread_over_visible_devices(num_inputs, pitched):
-    """Inputs round-robin over every visible XPU, gathered onto each one in
-    turn, as in FBGEMM's ``test_all_to_one_device``. With one device every
-    input is already on the target and must come back as the same view."""
-    generator = torch.Generator().manual_seed(num_inputs)
-    storages = [
-        torch.randn((10, 64 if pitched else 20), generator=generator)
-        for _ in range(num_inputs)
-    ]
-    expected = [storage[:, :20] for storage in storages]
-    count = torch.xpu.device_count()
-    for target_index in range(count):
-        target = torch.device(f"xpu:{target_index}")
-        inputs = [
-            storage.to(f"xpu:{index % count}")[:, :20]
-            for index, storage in enumerate(storages)
-        ]
-        outputs = torch.ops.fbgemm.all_to_one_device(inputs, target)
-        assert len(outputs) == len(inputs)  # nosec B101
-        for source, actual, reference in zip(inputs, outputs, expected):
-            assert actual.device == target  # nosec B101
-            if source.device == target:
-                assert actual.data_ptr() == source.data_ptr()  # nosec B101
-                assert actual.stride() == source.stride()  # nosec B101
-            torch.testing.assert_close(actual.cpu(), reference)
-
-
 def test_rejects_unsupported_device_inputs():
     xpu = torch.device("xpu:0")
     tensor = torch.ones(2, device=xpu)
@@ -82,17 +56,21 @@ def test_rejects_unsupported_device_inputs():
 
 
 @requires_two_xpus
-def test_cross_device_copies_are_contiguous():
-    """Copied outputs are contiguous whatever the input layout, as on CUDA."""
+def test_mixed_devices_keep_target_views_and_copy_contiguous():
+    """In one call, a view already on the target comes back as the same view,
+    and copies are contiguous whatever the input layout, as on CUDA."""
     source = torch.device("xpu:1")
     target = torch.device("xpu:0")
-    inputs = [
+    on_target = torch.randn((10, 64), device=target)[:, :20]
+    copied = [
         torch.arange(24, device=source).reshape(4, 6).t(),
         torch.randn((2, 3, 4, 5), device=source).to(memory_format=torch.channels_last),
         torch.randn((10, 64), device=source)[:, :20],
     ]
-    outputs = torch.ops.fbgemm.all_to_one_device(inputs, target)
-    for source_tensor, actual in zip(inputs, outputs):
+    outputs = torch.ops.fbgemm.all_to_one_device([on_target, *copied], target)
+    assert outputs[0].data_ptr() == on_target.data_ptr()  # nosec B101
+    assert outputs[0].stride() == on_target.stride()  # nosec B101
+    for source_tensor, actual in zip(copied, outputs[1:]):
         assert actual.device == target  # nosec B101
         assert actual.is_contiguous()  # nosec B101
         torch.testing.assert_close(actual.cpu(), source_tensor.cpu())

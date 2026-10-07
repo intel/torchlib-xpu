@@ -6,7 +6,7 @@
 TorchRec's ``SeqEmbeddingsAllToOne`` gathers per-rank sequence embedding
 outputs onto one device with this operator. Tensors already on the target must
 come back as the same views, as on CUDA; the others are copied to the target.
-Tests use as many XPU devices as are visible; only the stream test needs two.
+Tests use as many XPU devices as are visible; the cross-device tests need two.
 """
 
 import fbgemm_xpu  # noqa: F401  - registers the fbgemm XPU operators
@@ -79,6 +79,23 @@ def test_rejects_unsupported_device_inputs():
         torch.ops.fbgemm.all_to_one_device([tensor], torch.device("xpu"))
     with pytest.raises(RuntimeError, match="must be a SYCL XPU tensor"):
         torch.ops.fbgemm.all_to_one_device([tensor, torch.ones(2)], xpu)
+
+
+@requires_two_xpus
+def test_cross_device_copies_are_contiguous():
+    """Copied outputs are contiguous whatever the input layout, as on CUDA."""
+    source = torch.device("xpu:1")
+    target = torch.device("xpu:0")
+    inputs = [
+        torch.arange(24, device=source).reshape(4, 6).t(),
+        torch.randn((2, 3, 4, 5), device=source).to(memory_format=torch.channels_last),
+        torch.randn((10, 64), device=source)[:, :20],
+    ]
+    outputs = torch.ops.fbgemm.all_to_one_device(inputs, target)
+    for source_tensor, actual in zip(inputs, outputs):
+        assert actual.device == target  # nosec B101
+        assert actual.is_contiguous()  # nosec B101
+        torch.testing.assert_close(actual.cpu(), source_tensor.cpu())
 
 
 @requires_two_xpus

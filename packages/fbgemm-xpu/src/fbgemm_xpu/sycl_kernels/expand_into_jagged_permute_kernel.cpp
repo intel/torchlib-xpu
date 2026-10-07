@@ -96,12 +96,13 @@ at::Tensor expand_into_jagged_permute_xpu(
         input_offsets.device(),
         ", and output_offsets on ",
         output_offsets.device());
-    SYCL_DEVICE_GUARD(permute);
 
     // Input validation (mirrors the CUDA TORCH_CHECKs).
     TORCH_CHECK(permute.numel() > 0);
     TORCH_CHECK(permute.numel() == input_offsets.numel() - 1);
     TORCH_CHECK(permute.numel() == output_offsets.numel() - 1);
+
+    SYCL_DEVICE_GUARD(permute);
 
     // Ensure contiguous for direct pointer access.
     const auto permute_contig = permute.contiguous();
@@ -112,10 +113,7 @@ at::Tensor expand_into_jagged_permute_xpu(
 
     at::Tensor output_permute = at::empty({output_size}, permute.options());
 
-    // Use the current stream for the inputs' XPU device. The process-wide
-    // current device can differ in multi-XPU applications.
-    sycl::queue& queue = c10::xpu::getCurrentXPUStream(
-        permute.device().index()).queue();
+    sycl::queue& queue = c10::xpu::getCurrentXPUStream().queue();
 
     // Work-group layout mirrors the CUDA dim3(kWarpSize, T_blocks) launch with
     // the dimension order reversed, because SYCL varies the last nd_range

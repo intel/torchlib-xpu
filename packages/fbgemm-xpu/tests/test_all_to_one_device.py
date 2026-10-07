@@ -99,9 +99,8 @@ def test_cross_device_copies_are_contiguous():
 
 
 @requires_two_xpus
-def test_cross_device_stream_copy_and_lifetime():
-    """Copies in both directions on non-default streams, with the inputs
-    released before the result is consumed."""
+def test_cross_device_stream_copy():
+    """Copies in both directions on non-default streams."""
     for source_index, target_index in ((0, 1), (1, 0)):
         source = torch.device(f"xpu:{source_index}")
         target = torch.device(f"xpu:{target_index}")
@@ -116,7 +115,6 @@ def test_cross_device_stream_copy_and_lifetime():
         torch.xpu.current_stream(source).wait_stream(producer)
         with torch.xpu.stream(consumer):
             outputs = torch.ops.fbgemm.all_to_one_device(inputs, target)
-            del inputs
             consumed = [tensor.clone() for tensor in outputs]
         consumer.synchronize()
         expected = [

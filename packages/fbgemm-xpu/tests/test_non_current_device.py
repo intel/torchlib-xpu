@@ -94,6 +94,23 @@ def test_block_bucketize_sparse_features_inference(devices):
     _run(operator, [lengths, indices, block_sizes], devices)
 
 
+@pytest.mark.parametrize("kernel", ["serial", "chunked"])
+def test_block_bucketize_sparse_features_inference_long_rows(devices, monkeypatch, kernel):
+    monkeypatch.setenv("FBGEMM_XPU_BLOCK_BUCKETIZE_KERNEL", kernel)
+    generator = torch.Generator().manual_seed(4)
+    lengths = torch.tensor([3000, 0, 1500], dtype=torch.int64)
+    indices = torch.randint(0, 1000, (4500,), generator=generator, dtype=torch.int64)
+    block_sizes = torch.full((3,), 250, dtype=torch.int64)
+
+    def operator(lengths, indices, block_sizes):
+        return torch.ops.fbgemm.block_bucketize_sparse_features_inference(
+            lengths, indices, False, True, block_sizes, 4, None,
+            return_bucket_mapping=True,
+        )
+
+    _run(operator, [lengths, indices, block_sizes], devices)
+
+
 def test_block_bucketize_sparse_features(devices):
     lengths, indices = _sparse_features()
     block_sizes = torch.full((3,), 250, dtype=torch.int32)

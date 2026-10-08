@@ -1,5 +1,5 @@
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/intel/torchlib-xpu/badge)](https://scorecard.dev/viewer/?uri=github.com/intel/torchlib-xpu)
-[![Coverity Scan Build Status](https://scan.coverity.com/projects/intel-torchlib-xpu/badge.svg)](https://scan.coverity.com/projects/intel-torchlib-xpu)
+[![CodeQL](https://github.com/intel/torchlib-xpu/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/intel/torchlib-xpu/actions/workflows/github-code-scanning/codeql)
 
 # Intel® XPU Library for PyTorch* Ecosystem Projects
 

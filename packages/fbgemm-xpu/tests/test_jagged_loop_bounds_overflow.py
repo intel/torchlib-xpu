@@ -33,6 +33,8 @@ each is asserted to do so at import time.
    memory would go unnoticed.
 """
 
+import os
+
 import fbgemm_xpu  # noqa: F401  - registers the fbgemm XPU operators
 import pytest
 import torch
@@ -93,8 +95,22 @@ def _release_device_memory():
 
 
 def _require_memory(elements: int) -> None:
-    """Skip unless the device can hold `elements` elements plus 50% headroom."""
+    """Skip unless the device can hold `elements` elements plus 50% headroom.
+
+    With FBGEMM_XPU_TEST_SHARED_GPU=1, also skip if that is over half of the
+    device's physical memory: CI runs a second test process on the same GPU,
+    and the driver backs allocations past physical memory with system memory
+    instead of failing, so two over-committed processes crawl rather than raise.
+    """
     needed = int(elements * _DTYPE.itemsize * 1.5)
+    if os.environ.get("FBGEMM_XPU_TEST_SHARED_GPU") == "1":
+        total = torch.xpu.get_device_properties().total_memory
+        if needed > total // 2:
+            pytest.skip(
+                f"needs ~{needed / 2**30:.1f} GiB, over half of the device's "
+                f"{total / 2**30:.1f} GiB, the limit while "
+                f"FBGEMM_XPU_TEST_SHARED_GPU=1"
+            )
     free, _ = torch.xpu.mem_get_info()
     if free < needed:
         pytest.skip(

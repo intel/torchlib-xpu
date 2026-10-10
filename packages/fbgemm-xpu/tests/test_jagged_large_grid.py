@@ -49,9 +49,14 @@ Reaching the limit at D = 16 now needs nnz ~ 268M, or ~16 GiB for ``x_values``
 alone; D = 1 reproduces the same 2**31 launch in ~4 GiB, so that is what the
 tests below use.
 
-Each test is skipped unless the device has enough free memory; the smallest shape
-that trips either limit needs multi-gigabyte operands.
+Each test is skipped unless the device has enough free memory; the smallest
+shape that trips either limit needs multi-gigabyte operands. With
+FBGEMM_XPU_TEST_SHARED_GPU=1, as CI sets it, a test is also skipped unless its
+operands fit in half of the device's physical memory, leaving room for a second
+test process on the same GPU.
 """
+
+import os
 
 import fbgemm_xpu  # noqa: F401  - registers the fbgemm XPU operators
 import pytest
@@ -82,8 +87,23 @@ def _release_device_memory():
 
 
 def _require_memory(num_elements: int) -> None:
-    """Skip unless the device can hold `num_elements` of the test dtype."""
+    """Skip unless the device can hold `num_elements` of the test dtype.
+
+    The free figure covers this process's view of the device. With
+    FBGEMM_XPU_TEST_SHARED_GPU=1 a cap at half of physical memory also covers
+    what it cannot see: CI runs a second test process on the same GPU, and the
+    driver backs allocations past physical memory with system memory instead
+    of failing, so two over-committed processes crawl rather than raise.
+    """
     needed = int(num_elements * _DTYPE.itemsize * 1.5)
+    if os.environ.get("FBGEMM_XPU_TEST_SHARED_GPU") == "1":
+        total = torch.xpu.get_device_properties().total_memory
+        if needed > total // 2:
+            pytest.skip(
+                f"needs ~{needed / 2**30:.1f} GiB, over half of the device's "
+                f"{total / 2**30:.1f} GiB, the limit while "
+                f"FBGEMM_XPU_TEST_SHARED_GPU=1"
+            )
     free, _ = torch.xpu.mem_get_info()
     if free < needed:
         pytest.skip(

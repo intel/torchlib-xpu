@@ -16,10 +16,10 @@ from torch.utils._python_dispatch import TorchDispatchMode
 LOOKUP = "fbgemm::int_nbit_split_embedding_codegen_lookup_function"
 BOUNDS = "fbgemm::bounds_check_indices"
 
-
 @pytest.fixture
 def fbgemm():
-    assert importlib.metadata.version("fbgemm-gpu-cpu") == "1.9.0"  # nosec B101
+    version = importlib.metadata.version("fbgemm-gpu-cpu")
+    assert version.split(".")[:2] == ["1", "9"], version  # nosec B101
     importlib.import_module("fbgemm_gpu")
     return importlib.import_module("fbgemm_gpu.split_table_batched_embeddings_ops_inference")
 

@@ -1,0 +1,202 @@
+From fbad422d8e19a25709ebc39fb27d2baaf34e2475 Mon Sep 17 00:00:00 2001
+From: Alberto Gallegos <alberto.gallegos.muro@intel.com>
+Date: Thu, 1 Oct 2026 23:50:26 +0000
+Subject: [PATCH] Add XPU support to the FBGEMM jagged tensor benchmark
+
+Time the jagged operators registered on XPU with torchlib-xpu's event-based
+helper, fbgemm_xpu.bench.bench_utils.benchmark_torch_function. Upstream's
+helper cannot time XPU: it calls torch.cuda.set_device for any non-cuda
+device, and its non-CUDA branch is a wall clock without device
+synchronisation, which on XPU measures queue submission. The import is
+rewired rather than the helper edited; at 1.9.0 it ships in the wheel, so a
+patched checkout copy would not take effect.
+
+The `device` case runs on XPU only, restricted to the three sub-benchmarks
+whose operators have XPU implementations: jagged_2d_to_dense,
+dense_to_jagged and jagged_dense_elementwise_add_jagged_output. The
+jagged_dense_elementwise_mul half and the other sub-benchmarks are skipped
+with a logged reason, as are the seven other cases, none of which drives an
+XPU-implemented operator. The skip helpers live in fbgemm_xpu.bench.skips.
+
+This patch only edits existing code. New functions and classes live in
+torchlib-xpu's fbgemm_xpu.bench package, which also provides the
+jagged-sweep benchmark as python -m fbgemm_xpu.bench.jagged_sweep.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Alberto Gallegos <alberto.gallegos.muro@intel.com>
+---
+ fbgemm_gpu/bench/jagged_tensor_benchmark.py | 65 +++++++++++++--------
+ 1 file changed, 40 insertions(+), 25 deletions(-)
+
+diff --git a/fbgemm_gpu/bench/jagged_tensor_benchmark.py b/fbgemm_gpu/bench/jagged_tensor_benchmark.py
+index 884a570..b0a3908 100644
+--- a/fbgemm_gpu/bench/jagged_tensor_benchmark.py
++++ b/fbgemm_gpu/bench/jagged_tensor_benchmark.py
+@@ -18,8 +18,14 @@ from dataclasses import dataclass
+ 
+ import click
+ import fbgemm_gpu
++import fbgemm_xpu  # noqa: F401  - registers the fbgemm XPU operators
+ import torch
+-from fbgemm_gpu.bench.bench_utils import benchmark_torch_function
++
++# XPU: upstream's helper cannot time XPU (it calls torch.cuda.set_device for any
++# non-cuda device and its fallback is an unsynchronised wall clock), so every
++# measurement in this patched script uses torchlib-xpu's event-based helper.
++from fbgemm_xpu.bench.bench_utils import benchmark_torch_function
++from fbgemm_xpu.bench.skips import drop_xpu_skipped_sub_benchmarks, skipped_on_xpu
+ from torch.profiler import profile, schedule
+ 
+ logger: logging.Logger = logging.getLogger()
+@@ -105,6 +111,9 @@ class JaggedTensor:
+         if device == "cuda" and torch.cuda.is_available():
+             values_2d = values_2d.cuda()
+             offsets = offsets.cuda()
++        elif device == "xpu":
++            values_2d = values_2d.xpu()
++            offsets = offsets.xpu()
+ 
+         return JaggedTensor(
+             values_2d, lengths, offsets, batch_size, embedding_dim, max_len
+@@ -221,14 +230,6 @@ def bench_jagged_dense_elementwise_op_jagged_output(jten: JaggedTensor) -> None:
+             jagged_x.lengths,
+         )
+ 
+-    def nested_tensor_mul(
+-        jagged_x: JaggedTensor, nested_x: torch.Tensor, dense_y: torch.Tensor
+-    ) -> torch.Tensor:
+-        return nested_x * dense_to_nested(
+-            dense_y,
+-            jagged_x.lengths,
+-        )
+-
+     offsets_nbytes = jten.offsets.numel() * jten.offsets.element_size()
+     values_nbytes = jten.values.numel() * jten.values.element_size()
+     num_bytes = offsets_nbytes + 3 * values_nbytes
+@@ -249,20 +250,8 @@ def bench_jagged_dense_elementwise_op_jagged_output(jten: JaggedTensor) -> None:
+         f"(Add) PyTorch NestedTensor: {time} sec {num_bytes / time / 1e9} GB/s"
+     )
+ 
+-    time, jagged_output = benchmark_torch_function(
+-        torch.ops.fbgemm.jagged_dense_elementwise_mul,
+-        (jten.values, [jten.offsets], jten.to_dense()),
+-        iters=1000,
+-    )
+-    logging.info(f"(Mul) FBGEMM JaggedTensor: {time} sec {num_bytes / time / 1e9} GB/s")
+-
+-    time, nested_output = benchmark_torch_function(
+-        nested_tensor_mul,
+-        (jten, jten.as_nested(), jten.to_dense()),
+-        iters=1000,
+-    )
+     logging.info(
+-        f"(Mul) PyTorch NestedTensor: {time} sec {num_bytes / time / 1e9} GB/s"
++        "SKIPPED (Mul) on xpu: jagged_dense_elementwise_mul has no XPU implementation"
+     )
+     logging.info("")
+ 
+@@ -389,9 +378,9 @@ def bench_dense_to_jagged_1d(jten: JaggedTensor) -> None:
+ )
+ @click.option(
+     "--device",
+-    type=click.Choice(["cpu", "cuda"]),
+-    default="cuda",
+-    help="Device to run the benchmark on. Default is cuda.",
++    type=click.Choice(["xpu"]),
++    default="xpu",
++    help="Device to run the benchmark on. The patched script times XPU only.",
+ )
+ @click.option(
+     "--export-trace",
+@@ -424,6 +413,8 @@ def device(
+ ) -> None:
+     if device == "cuda" and not torch.cuda.is_available():
+         raise click.UsageError("CUDA requested but not available.")
++    if export_trace:
++        raise click.UsageError("--export-trace is not supported on xpu.")
+ 
+     # set manual seed for reproducibility
+     if manual_seed:
+@@ -481,6 +472,9 @@ def device(
+         "bench_jagged_1d_to_dense": bench_jagged_1d_to_dense,
+         "bench_dense_to_jagged_1d": bench_dense_to_jagged_1d,
+     }
++    only = drop_xpu_skipped_sub_benchmarks(all_benchmarks, only)
++    if only == "":
++        return
+ 
+     # Map bench name -> trace callable for schedule-based trace capture
+     trace_callables: dict[str, Callable[[], None]] = {}
+@@ -574,6 +568,9 @@ def device(
+     type=str,
+     default="batched_dense_vec_jagged_2d_mul_trace_{ospid}.json",
+ )
++@skipped_on_xpu(
++    "batched_dense_vec_jagged_2d_mul_forward has no XPU implementation"
++)
+ def batched_dense_vec_jagged_2d_mul(
+     batch_size: int,
+     h_dim: int,
+@@ -684,6 +681,9 @@ def batched_dense_vec_jagged_2d_mul(
+     type=str,
+     default="jagged_1d_to_truncated_values_trace_{ospid}.json",
+ )
++@skipped_on_xpu(
++    "jagged_1d_to_truncated_values has no XPU implementation (CPU-only case upstream)"
++)
+ def jagged_1d_to_truncated_values(
+     batch_size: int,
+     max_len: int,
+@@ -792,6 +792,9 @@ def jagged_1d_to_truncated_values(
+     type=str,
+     default="masked_select_jagged_1d_trace_{ospid}.json",
+ )
++@skipped_on_xpu(
++    "masked_select_jagged_1d has no XPU implementation (CPU-only case upstream)"
++)
+ def masked_select_jagged_1d(
+     batch_size: int,
+     max_len: int,
+@@ -903,6 +906,9 @@ def masked_select_jagged_1d(
+     default="cuda",
+     help="Device to run the benchmark on (default: cuda).",
+ )
++@skipped_on_xpu(
++    "keyed_jagged_index_select_dim1 has no XPU implementation, and the jagged_index_select baseline's backward needs jagged_index_add_2d_forward, which has none either"
++)
+ def keyed_jagged_index_select_dim1(
+     num_batches: int,
+     max_seq_length: int,
+@@ -1122,6 +1128,9 @@ def keyed_jagged_index_select_dim1(
+     type=str,
+     default="jagged_slice_cpu_trace_{ospid}.json",
+ )
++@skipped_on_xpu(
++    "CPU-only case by design; jagged_slice_forward has no XPU implementation"
++)
+ def jagged_slice_cpu(
+     max_seq_length: int,
+     input_batch_size: int,
+@@ -1295,6 +1304,9 @@ def jagged_slice_cpu(
+     default="permute_multi_embedding_trace_{ospid}.json",
+     help="Trace file URL for the permute_multi_embedding operation.",
+ )
++@skipped_on_xpu(
++    "permute_pooled_embs and permute_multi_embedding have no XPU implementation"
++)
+ def permute_pooled_embs_bench(
+     num_of_features: int,
+     num_of_tensors: int,
+@@ -1530,6 +1542,9 @@ def permute_pooled_embs_bench(
+     type=str,
+     default="jagged_acc_weights_and_counts_trace_{ospid}.json",
+ )
++@skipped_on_xpu(
++    "jagged_acc_weights_and_counts has no XPU implementation"
++)
+ def jagged_acc_weights_and_counts_bench(
+     num_elements: int,
+     num_unique_indices: int,
+-- 
+2.43.0
+

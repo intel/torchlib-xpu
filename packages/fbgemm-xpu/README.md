@@ -129,6 +129,16 @@ uv pip install -e "packages/fbgemm-xpu[test]" \
 python -c "import fbgemm_xpu; print(fbgemm_xpu.__version__)"
 ```
 
+## Benchmarks
+
+The jagged operators `jagged_to_padded_dense`, `jagged_2d_to_dense`,
+`dense_to_jagged` and `jagged_dense_elementwise_add_jagged_output` are
+benchmarked, forward and backward, with `python -m fbgemm_xpu.bench.jagged_sweep`.
+The upstream FBGEMM jagged tensor benchmark is also patched for XPU. The
+[baselines README](bench/baselines/README.md) covers how to reproduce the
+results, the sweep definition and the committed baselines. See also
+[CONTRIBUTING.md](../../CONTRIBUTING.md).
+
 ## Environment variables
 
 Environment variables will be added as new FBGEMM operators are integrated into this project.

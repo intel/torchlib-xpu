@@ -477,18 +477,38 @@ jobs:
       run: |
         python -c "import torch; assert torch.xpu.is_available(), 'XPU (Intel GPU) is not available'"
     - name: 'Test fbgemm-xpu'
+      env:
+        # Both matrix entries share one GPU, so cap each launch-grid test at
+        # half of device memory. That skips the 12 and 18 GiB cases here; they
+        # run only when the tests are run manually without the variable.
+        FBGEMM_XPU_TEST_SHARED_GPU: '1'
       run: |
         # Upstream FBGEMM tests (patched) cover shared operator behavior and parity.
         # The tests below cover XPU/SYCL cases that upstream does not:
         # launch-grid limits, device validation, and strided fast-path inputs.
+        # faulthandler_timeout dumps every thread's stack if a test runs over
+        # 10 minutes, so a hang shows where it is stuck.
         pytest -rsf torchlib-xpu/packages/fbgemm-xpu/tests/
-    - name: 'Patch upstream FBGEMM tests'
+    - name: 'Smoke run jagged sweep'
+      run: |
+        # jagged-sweep checks each case against CPU before timing it; the
+        # timings themselves are not used, so the PVC baseline is not compared
+        # against this runner.
+        python -m fbgemm_xpu.bench.jagged_sweep --smoke --output "$RUNNER_TEMP/jagged_sweep_smoke.csv"
+    - name: 'Patch upstream FBGEMM tests and benchmarks'
       working-directory: fbgemm
       run: |
         git am ../torchlib-xpu/packages/fbgemm-xpu/patches/0001-Add-XPU-support-to-fbgemm-tests.patch
-        unexpected=$(git diff --name-only "$FBGEMM_VERSION" HEAD | grep -v '^fbgemm_gpu/test/' || true)
+        git am ../torchlib-xpu/packages/fbgemm-xpu/patches/0002-Add-XPU-support-to-fbgemm-jagged-benchmark.patch
+        unexpected=$(git diff --name-only "$FBGEMM_VERSION" HEAD | grep -vE '^fbgemm_gpu/(test|bench)/' || true)
         if [ -n "$unexpected" ]; then
-          echo "Patches modified non-test FBGEMM files:"
+          echo "Patches modified non-test, non-bench FBGEMM files:"
+          echo "$unexpected"
+          exit 1
+        fi
+        unexpected=$(git diff --name-only HEAD~1 HEAD | grep -v '^fbgemm_gpu/bench/' || true)
+        if [ -n "$unexpected" ]; then
+          echo "Benchmark patch modified non-bench FBGEMM files:"
           echo "$unexpected"
           exit 1
         fi
@@ -510,6 +530,11 @@ jobs:
         pytest -rsf fbgemm_gpu/test/sparse/reorder_batched_test.py
         pytest -rsf fbgemm_gpu/test/tbe/utils/generate_vbe_metadata_test.py
         pytest -rsf fbgemm_gpu/test/tbe/utils/split_embeddings_utils_test.py
+    - name: 'Smoke run patched upstream jagged benchmark'
+      working-directory: fbgemm
+      run: |
+        # Exercises the benchmark patch on every run.
+        python fbgemm_gpu/bench/jagged_tensor_benchmark.py device --batch-size 8 --max-len 16
 
   publish:
     needs: [ compose, test-torchcodec, test-fbgemm ]

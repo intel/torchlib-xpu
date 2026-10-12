@@ -19,7 +19,9 @@ happened to synchronize next, instead of an error at the API boundary.
 share one XPU device, before a queue is selected. Each case below is a clean
 ``RuntimeError``; the operators are exercised at both float16 (the FP16 fast
 path, ``..._opt_``) and float32 (the generic kernel), which carry the check
-separately.
+separately. ``jagged_dense_elementwise_mul_backward`` also runs the check in its
+jagged-jagged launcher, which takes the forward ``x_values`` as a second jagged
+operand.
 
 Every case keeps the operator's *first* tensor argument on an XPU: a CPU tensor
 in that position routes the call to upstream's CPU implementation, which rejects
@@ -181,6 +183,109 @@ def test_jagged_to_padded_dense_rejects_second_xpu_offsets():
     with pytest.raises(RuntimeError, match=_REJECTED):
         torch.ops.fbgemm.jagged_to_padded_dense_forward(
             x_values.to("xpu:0"), [offsets.to("xpu:1")], [_MAX_L], 0.0
+        )
+
+
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_mul_rejects_cpu_dense(dtype):
+    """jagged_dense_elementwise_mul shares the jagged-output helpers."""
+    x_values, offsets, dense = _jagged_args(dtype)
+
+    with pytest.raises(RuntimeError, match=_REJECTED):
+        torch.ops.fbgemm.jagged_dense_elementwise_mul(
+            x_values.to("xpu"), [offsets.to("xpu")], dense
+        )
+
+
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_mul_rejects_cpu_offsets(dtype):
+    """A CPU offsets tensor is rejected by the multiply as well."""
+    x_values, offsets, dense = _jagged_args(dtype)
+
+    with pytest.raises(RuntimeError, match=_REJECTED):
+        torch.ops.fbgemm.jagged_dense_elementwise_mul(
+            x_values.to("xpu"), [offsets], dense.to("xpu")
+        )
+
+
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_mul_rejects_empty_cpu_dense(dtype):
+    """The zero-filled result for an empty dense operand comes after the check."""
+    x_values, offsets, dense = _jagged_args(dtype, max_l=0)
+    assert dense.numel() == 0, "must reach the y.numel() == 0 early return"  # nosec B101
+
+    with pytest.raises(RuntimeError, match=_REJECTED):
+        torch.ops.fbgemm.jagged_dense_elementwise_mul(
+            x_values.to("xpu"), [offsets.to("xpu")], dense
+        )
+
+
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_mul_backward_rejects_cpu_dense(dtype):
+    """The x gradient's jagged-output launch rejects a CPU dense operand."""
+    x_values, offsets, dense = _jagged_args(dtype)
+
+    with pytest.raises(RuntimeError, match=_REJECTED):
+        torch.ops.fbgemm.jagged_dense_elementwise_mul_backward(
+            x_values.to("xpu"), [offsets.to("xpu")], dense, x_values.to("xpu")
+        )
+
+
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_mul_backward_rejects_cpu_x_values(dtype):
+    """The y gradient's jagged-jagged launch rejects CPU forward x_values."""
+    x_values, offsets, dense = _jagged_args(dtype)
+
+    with pytest.raises(RuntimeError, match=_REJECTED):
+        torch.ops.fbgemm.jagged_dense_elementwise_mul_backward(
+            x_values.to("xpu"), [offsets.to("xpu")], dense.to("xpu"), x_values
+        )
+
+
+@requires_two_xpus
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_mul_rejects_second_xpu_dense(dtype):
+    """A dense operand on xpu:1 is rejected by the multiply."""
+    x_values, offsets, dense = _jagged_args(dtype)
+
+    with pytest.raises(RuntimeError, match=_REJECTED):
+        torch.ops.fbgemm.jagged_dense_elementwise_mul(
+            x_values.to("xpu:0"), [offsets.to("xpu:0")], dense.to("xpu:1")
+        )
+
+
+@requires_two_xpus
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_mul_backward_rejects_second_xpu_x_values(dtype):
+    """The jagged-jagged launch compares device indices, not just device type."""
+    x_values, offsets, dense = _jagged_args(dtype)
+
+    with pytest.raises(RuntimeError, match=_REJECTED):
+        torch.ops.fbgemm.jagged_dense_elementwise_mul_backward(
+            x_values.to("xpu:0"),
+            [offsets.to("xpu:0")],
+            dense.to("xpu:0"),
+            x_values.to("xpu:1"),
+        )
+
+
+def test_add_dense_output_rejects_cpu_offsets():
+    """jagged_dense_elementwise_add densifies x through the dense-output helper."""
+    x_values, offsets, dense = _jagged_args(torch.float32)
+
+    with pytest.raises(RuntimeError, match=_REJECTED):
+        torch.ops.fbgemm.jagged_dense_elementwise_add(
+            x_values.to("xpu"), [offsets], dense.to("xpu")
+        )
+
+
+def test_add_dense_output_rejects_cpu_dense():
+    """The dense operand reaches only the final ATen add, which rejects it."""
+    x_values, offsets, dense = _jagged_args(torch.float32)
+
+    with pytest.raises(RuntimeError, match="same device"):
+        torch.ops.fbgemm.jagged_dense_elementwise_add(
+            x_values.to("xpu"), [offsets.to("xpu")], dense
         )
 
 

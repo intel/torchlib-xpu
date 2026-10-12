@@ -163,6 +163,45 @@ def test_jagged_index_select_2d_forward(devices):
     )
 
 
+def _jagged_dense():
+    generator = torch.Generator().manual_seed(5)
+    # The second batch row is longer than max_L, so its last row is truncated.
+    offsets = torch.tensor([0, 2, 5], dtype=torch.int64)
+    x_values = torch.randn((5, 16), generator=generator)
+    dense = torch.randn((2, 3, 16), generator=generator)
+    return x_values, offsets, dense
+
+
+def test_jagged_dense_elementwise_mul_forward(devices):
+    def operator(x_values, offsets, dense):
+        return torch.ops.fbgemm.jagged_dense_elementwise_mul_forward(
+            x_values, [offsets], dense
+        )
+
+    _run(operator, list(_jagged_dense()), devices)
+
+
+def test_jagged_dense_elementwise_mul_backward(devices):
+    x_values, offsets, dense = _jagged_dense()
+    grad_output = torch.randn(x_values.shape, generator=torch.Generator().manual_seed(6))
+
+    def operator(grad_output, offsets, dense, x_values):
+        return torch.ops.fbgemm.jagged_dense_elementwise_mul_backward(
+            grad_output, [offsets], dense, x_values
+        )
+
+    _run(operator, [grad_output, offsets, dense, x_values], devices)
+
+
+def test_jagged_dense_elementwise_add(devices):
+    def operator(x_values, offsets, dense):
+        return torch.ops.fbgemm.jagged_dense_elementwise_add(
+            x_values, [offsets], dense
+        )
+
+    _run(operator, list(_jagged_dense()), devices)
+
+
 def test_block_bucketize_rejects_mixed_devices(devices):
     current_device, data_device = devices
     lengths, indices = _sparse_features()

@@ -149,6 +149,18 @@ struct JaggedOpAdd {
     }
 };
 
+// f = x * y  (jagged_dense_elementwise_mul_forward/backward)
+struct JaggedOpMul {
+    template <typename T>
+    inline T operator()(T x, T y_0) const {
+        return static_cast<T>(static_cast<float>(x) * static_cast<float>(y_0));
+    }
+    template <typename T>
+    inline T operator()(T x, T y_0, T /*y_1*/) const {
+        return static_cast<T>(static_cast<float>(x) * static_cast<float>(y_0));
+    }
+};
+
 // ============================================================================
 // walk_down_tensor_storage_tree_ - jagged storage tree traversal
 // ============================================================================

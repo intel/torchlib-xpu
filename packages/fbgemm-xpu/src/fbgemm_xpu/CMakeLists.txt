@@ -5,6 +5,7 @@
 # --------------------------------------------------------------------------
 set(host_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/all_to_one_device.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/jagged_tensor_ops_xpu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ops_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sparse_async_cumsum.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/split_embeddings_utils_xpu.cpp
@@ -14,6 +15,8 @@ set(host_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/sycl_kernels/expand_into_jagged_permute_kernel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sycl_kernels/invert_permute_kernel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sycl_kernels/jagged_dense_elementwise_add_jagged_output.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/sycl_kernels/jagged_dense_elementwise_mul_backward.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/sycl_kernels/jagged_dense_elementwise_mul_forward.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sycl_kernels/jagged_index_select_2d.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sycl_kernels/jagged_to_padded_dense_backward.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sycl_kernels/jagged_to_padded_dense_forward.cpp

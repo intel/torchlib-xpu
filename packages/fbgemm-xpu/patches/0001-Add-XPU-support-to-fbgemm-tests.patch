@@ -1,4 +1,4 @@
-From 0c0d29b0926c2c93b8564441b1e1040684d71f3a Mon Sep 17 00:00:00 2001
+From 7560bb64074a3d0372130a041544a323b64cf10e Mon Sep 17 00:00:00 2001
 From: Alberto Gallegos <alberto.gallegos.muro@intel.com>
 Date: Thu, 9 Jul 2026 18:28:28 +0000
 Subject: [PATCH] Add XPU support to FBGEMM sparse ops and jagged tensor tests
@@ -45,15 +45,15 @@ The dense_to_jagged, jagged_to_padded_dense, jagged_2d_to_dense and
 jagged_1d_to_dense tests run on the accelerator through the device-agnostic
 accelerator helpers.
 
-Four operators in these files have no XPU kernel. stacked_jagged_1d_to_dense and
+Two operators in these files have no XPU kernel. stacked_jagged_1d_to_dense and
 stacked_jagged_2d_to_dense need fbgemm::offsets_range and a cub::DeviceScan
-equivalent, so those two tests are skipped. jagged_dense_elementwise_add and
-jagged_dense_elementwise_mul are handled differently: the three tests in
-elementwise_binary_test.py sample operation from {add, add_jagged_output, mul}, and
-only add_jagged_output has an XPU kernel, so the sampled set is narrowed to
-add_jagged_output rather than skipping the tests. All three then run and keep
-covering the implemented operator, including the vectorized Half fast path and the
-torch.compile dynamic-shape path.
+equivalent, so those two tests are skipped. elementwise_binary_test.py covers
+jagged_dense_elementwise_add, jagged_dense_elementwise_add_jagged_output and
+jagged_dense_elementwise_mul on the accelerator, including the vectorized Half
+fast path and the torch.compile dynamic-shape path. Its Half fast-path test is
+gated on accelerator_unavailable, and the jagged_dense_elementwise_mul backward
+large-grid regression on accelerator_unavailable and accelerator_memory_lt_gb(32),
+so it runs on accelerators with at least 32 GB of memory.
 
 Enable test_all_to_one_device in merge_pooled_embeddings_test.py on the
 current accelerator through the shared accelerator helpers. The class-level
@@ -71,7 +71,7 @@ Co-authored-by: Felipe Leza Alvarez <felipe.leza.alvarez@intel.com>
  fbgemm_gpu/test/jagged/2d_to_dense_test.py    |  39 ++--
  fbgemm_gpu/test/jagged/common.py              |   1 +
  .../test/jagged/dense_to_jagged_test.py       |  19 +-
- .../test/jagged/elementwise_binary_test.py    |  19 +-
+ .../test/jagged/elementwise_binary_test.py    |  14 +-
  .../jagged/expand_into_jagged_permute_test.py |  29 +--
  .../jagged/jagged_index_select_2d_test.py     |  28 ++-
  .../test/merge_pooled_embeddings_test.py      |  31 +++-
@@ -83,7 +83,7 @@ Co-authored-by: Felipe Leza Alvarez <felipe.leza.alvarez@intel.com>
  .../tbe/utils/generate_vbe_metadata_test.py   |  23 ++-
  .../tbe/utils/split_embeddings_utils_test.py  |  33 +++-
  fbgemm_gpu/test/test_utils.py                 |  52 +++++-
- 16 files changed, 392 insertions(+), 173 deletions(-)
+ 16 files changed, 384 insertions(+), 176 deletions(-)
 
 diff --git a/fbgemm_gpu/test/jagged/1d_to_dense_test.py b/fbgemm_gpu/test/jagged/1d_to_dense_test.py
 index 387ee1010..9ceb293fb 100644
@@ -321,38 +321,32 @@ index ce42f1c40..4e140e3a9 100644
          """Regression: int32 overflow in dense_to_jagged backward at
          B * max_L * D > INT_MAX, even when B * max_L itself fits in int32.
 diff --git a/fbgemm_gpu/test/jagged/elementwise_binary_test.py b/fbgemm_gpu/test/jagged/elementwise_binary_test.py
-index 44541b921..3df78b68a 100644
+index 44541b921..76012b75b 100644
 --- a/fbgemm_gpu/test/jagged/elementwise_binary_test.py
 +++ b/fbgemm_gpu/test/jagged/elementwise_binary_test.py
-@@ -26,6 +26,7 @@ from .common import (
+@@ -26,17 +26,17 @@ from .common import (
  if open_source:
      # pyre-ignore[21]
      from test_utils import (
++        accelerator_memory_lt_gb,
 +        accelerator_unavailable,
          cpu_and_maybe_gpu,
-         gpu_memory_lt_gb,
-         gpu_unavailable,
-@@ -34,6 +35,7 @@ if open_source:
+-        gpu_memory_lt_gb,
+-        gpu_unavailable,
+         gradcheck,
+         optests,
      )
  else:
      from fbgemm_gpu.test.test_utils import (
++        accelerator_memory_lt_gb,
 +        accelerator_unavailable,
          cpu_and_maybe_gpu,
-         gpu_memory_lt_gb,
-         gpu_unavailable,
-@@ -136,7 +138,10 @@ class ElementwiseBinaryTest(unittest.TestCase):
-         num_jagged_dim=st.integers(1, 4),
-         outer_dense_size=st.integers(0, 4),
-         inner_dense_size=st.integers(0, 4),
--        operation=st.sampled_from(["add", "add_jagged_output", "mul"]),
-+        # XPU port: only jagged_dense_elementwise_add_jagged_output has an XPU
-+        # kernel; jagged_dense_elementwise_add and jagged_dense_elementwise_mul
-+        # do not, so the sampled set is narrowed instead of skipping the test.
-+        operation=st.sampled_from(["add_jagged_output"]),
-         dtype=st.sampled_from([torch.float, torch.half, torch.bfloat16]),
-         device=cpu_and_maybe_gpu(),
+-        gpu_memory_lt_gb,
+-        gpu_unavailable,
+         gradcheck,
+         optests,
      )
-@@ -159,12 +164,15 @@ class ElementwiseBinaryTest(unittest.TestCase):
+@@ -159,7 +159,7 @@ class ElementwiseBinaryTest(unittest.TestCase):
              device,
          )
  
@@ -361,26 +355,16 @@ index 44541b921..3df78b68a 100644
      @given(
          num_jagged_dim=st.just(1),
          outer_dense_size=st.integers(0, 8),
-         inner_dense_size=st.sampled_from([16, 64, 96, 192]),
--        operation=st.sampled_from(["add_jagged_output", "mul"]),
-+        # XPU port: only jagged_dense_elementwise_add_jagged_output has an XPU
-+        # kernel; jagged_dense_elementwise_add and jagged_dense_elementwise_mul
-+        # do not, so the sampled set is narrowed instead of skipping the test.
-+        operation=st.sampled_from(["add_jagged_output"]),
-         dtype=st.just(torch.half),
-         device=cpu_and_maybe_gpu(),
-     )
-@@ -192,7 +200,10 @@ class ElementwiseBinaryTest(unittest.TestCase):
-         num_jagged_dim=st.integers(1, 5),
-         outer_dense_size=st.integers(2, 5),
-         inner_dense_size=st.integers(2, 5),
--        operation=st.sampled_from(["add", "add_jagged_output", "mul"]),
-+        # XPU port: only jagged_dense_elementwise_add_jagged_output has an XPU
-+        # kernel; jagged_dense_elementwise_add and jagged_dense_elementwise_mul
-+        # do not, so the sampled set is narrowed instead of skipping the test.
-+        operation=st.sampled_from(["add_jagged_output"]),
-         dtype=st.sampled_from([torch.float, torch.half, torch.bfloat16]),
-         device=cpu_and_maybe_gpu(),
+@@ -278,8 +278,8 @@ class ElementwiseBinaryTest(unittest.TestCase):
+ 
+         assert output.size() == output_ref.size()
+ 
+-    @unittest.skipIf(*gpu_unavailable)
+-    @unittest.skipIf(*gpu_memory_lt_gb(32))
++    @unittest.skipIf(*accelerator_unavailable)
++    @unittest.skipIf(*accelerator_memory_lt_gb(32))
+     @optests.dontGenerateOpCheckTests(
+         "the 32-GiB grid-overflow regression is covered by the direct GPU test"
      )
 diff --git a/fbgemm_gpu/test/jagged/expand_into_jagged_permute_test.py b/fbgemm_gpu/test/jagged/expand_into_jagged_permute_test.py
 index e3eb1b52c..2259a6b18 100644

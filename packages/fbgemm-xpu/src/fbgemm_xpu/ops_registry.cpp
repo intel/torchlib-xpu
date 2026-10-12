@@ -490,4 +490,45 @@ TORCH_LIBRARY_FRAGMENT(fbgemm, m) {
             ") -> (Tensor, Tensor[])"
         );
     }
+
+    if (!utils::torch::schemaExists("fbgemm::jagged_dense_elementwise_add")) {
+        m.def(
+            "jagged_dense_elementwise_add("
+            "    Tensor x_values, "
+            "    Tensor[] x_offsets, "
+            "    Tensor y"
+            ") -> Tensor"
+        );
+    }
+
+    if (!utils::torch::schemaExists("fbgemm::jagged_dense_elementwise_mul")) {
+        m.def(
+            "jagged_dense_elementwise_mul("
+            "    Tensor x_values, "
+            "    Tensor[] x_offsets, "
+            "    Tensor y"
+            ") -> (Tensor, Tensor[])"
+        );
+    }
+
+    if (!utils::torch::schemaExists("fbgemm::jagged_dense_elementwise_mul_forward")) {
+        m.def(
+            "jagged_dense_elementwise_mul_forward("
+            "    Tensor x_values, "
+            "    Tensor[] x_offsets, "
+            "    Tensor y"
+            ") -> Tensor"
+        );
+    }
+
+    if (!utils::torch::schemaExists("fbgemm::jagged_dense_elementwise_mul_backward")) {
+        m.def(
+            "jagged_dense_elementwise_mul_backward("
+            "    Tensor grad_output, "
+            "    Tensor[] x_offsets, "
+            "    Tensor y, "
+            "    Tensor x_values"
+            ") -> (Tensor, Tensor)"
+        );
+    }
 }

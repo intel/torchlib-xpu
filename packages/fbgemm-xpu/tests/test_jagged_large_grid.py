@@ -34,6 +34,10 @@ the launch spans ``roundup(rows, threads_y) * threads_x`` work-items against a
   fires at any D. ``test_jagged_to_padded_dense_forward_large_grid`` covers it at
   the smallest D that saturates ``threads_x``, which keeps the allocation as
   small as the limit allows.
+* **Jagged-jagged dense-output path** (the ``y`` gradient of
+  ``jagged_dense_elementwise_mul_backward``) takes the dense-output geometry but
+  builds ``packed_accessor32`` for its dense output, so as on the jagged-output
+  path the cap is reachable only at D = 1, here through the dense row count.
 
 The shape the jagged-output cap was first reported against is not the shape used
 here. That report predates commit 5f977a5, which replaced CUDA's
@@ -267,3 +271,56 @@ def test_dense_to_jagged_forward_large_grid():
     # Rows past the jagged region gather zero. The output buffer starts
     # uninitialized, so this also checks the capped launch reached those rows.
     _assert_all_zero(output[_LENGTHS[0] :])
+
+
+# ============================================================================
+# Jagged-jagged dense-output path - cap reachable at D = 1 via the row count
+# ============================================================================
+
+# The y gradient walks every dense position, so the grid follows B * max_L, and
+# packed_accessor32 on the dense output keeps B * max_L * D within int32. With
+# threads_x == D == 1 the work-group round-up alone pushes the launch past the
+# limit, exactly as for _NNZ above.
+_MUL_MAX_L = 16
+# One work-group past the last one that fits, rounded to whole batch rows: the
+# capped launch covers _MAX_BLOCKS * _THREADS_Y dense positions, and the
+# _MUL_MAX_L left over form precisely the final batch row.
+_MUL_B = (_MAX_BLOCKS * _THREADS_Y) // _MUL_MAX_L + 1
+_MUL_ROWS = _MUL_B * _MUL_MAX_L
+assert _MUL_ROWS - _MAX_BLOCKS * _THREADS_Y == _MUL_MAX_L  # nosec B101
+assert -(-_MUL_ROWS // _THREADS_Y) * _THREADS_Y * _THREADS_X > 2**31 - 1  # nosec B101
+assert _MUL_ROWS * _D <= 2**31 - 1  # nosec B101
+
+
+def test_jagged_dense_elementwise_mul_backward_large_grid():
+    """A beyond-limit dense gradient is fully written by the group-stride loop."""
+    # y and its gradient dominate; int32 offsets keep the B + 1 entries at 512 MiB.
+    _require_memory(2 * _MUL_ROWS * _D + _MUL_B * 2)
+
+    # Only the final batch row is jagged, and it is full, so the positions that
+    # need the second trip round the loop hold products rather than padding.
+    offsets = torch.zeros(_MUL_B + 1, device="xpu", dtype=torch.int32)
+    offsets[-1] = _MUL_MAX_L
+    x_values = torch.arange(
+        1, _MUL_MAX_L + 1, device="xpu", dtype=_DTYPE
+    ).view(_MUL_MAX_L, _D)
+    grad_output = torch.arange(
+        _MUL_MAX_L + 1, 2 * _MUL_MAX_L + 1, device="xpu", dtype=_DTYPE
+    ).view(_MUL_MAX_L, _D)
+    # Only the jagged positions of y are read, by the x gradient.
+    y = torch.empty(_MUL_B, _MUL_MAX_L, _D, device="xpu", dtype=_DTYPE)
+    y[-1] = torch.arange(
+        2 * _MUL_MAX_L + 1, 3 * _MUL_MAX_L + 1, device="xpu", dtype=_DTYPE
+    ).view(_MUL_MAX_L, _D)
+
+    x_values_grad, y_grad = torch.ops.fbgemm.jagged_dense_elementwise_mul_backward(
+        grad_output, [offsets], y, x_values
+    )
+
+    assert x_values_grad.shape == x_values.shape  # nosec B101
+    assert torch.equal(x_values_grad, grad_output * y[-1])  # nosec B101
+    assert y_grad.shape == y.shape  # nosec B101
+    # The y gradient starts uninitialized, so a position the launch missed would
+    # not hold the product.
+    assert torch.equal(y_grad[-1], grad_output * x_values)  # nosec B101
+    _assert_all_zero(y_grad.view(-1, _D)[: _MUL_ROWS - _MUL_MAX_L])

@@ -46,6 +46,8 @@
  *     -> BlockBucketizeScatterPooledKernel (serial),
  *        BlockBucketizeChunkScatterKernel<sequence=false>
  *   _populate_bucketized_permute_cuda_kernel -> PopulateBucketizedPermuteKernel
+ *   _populate_length_to_feature_id_inplace_kernel
+ *     -> PopulateLengthToFeatureIdxKernel
  * Deviations from CUDA:
  *   - CUDA kernel1 counts with atomics and the pooled kernel2 scatters with
  *     shared-memory atomics, so the pooled output order is not defined
@@ -592,12 +594,17 @@ public:
         batch_size_offsets_(batch_size_offsets),
         length_to_feature_idx_(length_to_feature_idx) {}
 
+    // max_B * T can exceed the int range of a launch, so the launch is capped
+    // and the kernel strides over the whole range.
     void operator()(const sycl::nd_item<1>& item) const {
-        const int64_t b_t = item.get_global_id(0);
-        const int64_t t = b_t / max_B_;
-        const int64_t b = b_t % max_B_;
-        if (t >= T_ || static_cast<offset_t>(b) >= batch_size_per_feature_[t]) return;
-        length_to_feature_idx_[batch_size_offsets_[t] + b] = static_cast<offset_t>(t);
+        const int64_t total = max_B_ * T_;
+        for (int64_t b_t = item.get_global_id(0); b_t < total;
+             b_t += item.get_global_range(0)) {
+            const int64_t t = b_t / max_B_;
+            const int64_t b = b_t % max_B_;
+            if (b >= static_cast<int64_t>(batch_size_per_feature_[t])) continue;
+            length_to_feature_idx_[batch_size_offsets_[t] + b] = static_cast<offset_t>(t);
+        }
     }
 
 private:
@@ -1347,15 +1354,15 @@ _block_bucketize_sparse_features_xpu(
         at::Tensor bso = xpu_excl_cumsum(bsf_contig);
 
         sycl::queue& q = c10::xpu::getCurrentXPUStream().queue();
-        const int64_t total = max_B * T;
-        const int64_t gs = grid_size(total) * kThreads;
+        const int64_t groups = xpu_cap_grid_dim_x(grid_size(max_B * T), kThreads);
 
         AT_DISPATCH_INDEX_TYPES(
             lengths.scalar_type(), "populate_len_to_feat", [&] {
                 using offset_t = index_t;
                 q.submit([&](sycl::handler& cgh) {
                     cgh.parallel_for<PopulateLengthToFeatureIdxKernel<offset_t>>(
-                        sycl::nd_range<1>(sycl::range<1>(gs), sycl::range<1>(kThreads)),
+                        sycl::nd_range<1>(
+                            sycl::range<1>(groups * kThreads), sycl::range<1>(kThreads)),
                         PopulateLengthToFeatureIdxKernel<offset_t>(
                             max_B, T,
                             bsf_contig.data_ptr<offset_t>(),

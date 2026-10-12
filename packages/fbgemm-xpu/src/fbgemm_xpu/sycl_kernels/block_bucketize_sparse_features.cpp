@@ -36,6 +36,7 @@
  * FBGEMM_XPU_BLOCK_BUCKETIZE_KERNEL=serial|chunked to force one path.
  *
  * SYCL PORT MAPPING TO FBGEMM CUDA SOURCE
+ *   (FBGEMM v1.9.0, fbgemm_gpu/src/sparse_ops/sparse_block_bucketize_features.cu)
  *   _block_bucketize_sparse_features_cuda_kernel1
  *     -> BlockBucketizeCountKernel (serial), BlockBucketizeChunkCountKernel
  *   _block_bucketize_sequence_sparse_features_cuda_kernel2
@@ -609,12 +610,14 @@ private:
 // ============================================================================
 // Chunked path
 // One sub-group per chunk of kChunkSize indices of one row; see the file
-// comment. The bucket arithmetic below repeats the serial kernels exactly:
-// block_bucketize_count_bucket matches BlockBucketizeCountKernel and
-// block_bucketize_scatter_bucket matches the two serial scatter kernels.
+// comment. The serial kernels keep the structure of the CUDA kernels, so they
+// do not call these helpers. The helpers must stay in step with them:
+// block_bucketize_count_bucket with BlockBucketizeCountKernel and
+// block_bucketize_scatter_bucket with the two serial scatter kernels.
 // ============================================================================
 
 static constexpr int64_t kChunkSize = fbgemm_xpu::kThreadGroupSize;
+static_assert(kChunkSize == 32, "chunk_ballot returns a 32-bit lane mask");
 
 template <typename index_t>
 struct BlockBucketizeFeature {
@@ -653,7 +656,7 @@ inline std::make_unsigned_t<index_t> block_bucketize_count_bucket(
         const BlockBucketizeFeature<index_t>& f,
         const index_t* block_bucketize_pos_concat,
         const index_t* block_bucketize_pos_offsets,
-        index_t* lb_out) {
+        index_t& lb) {
     using uindex_t = std::make_unsigned_t<index_t>;
     uindex_t idx = static_cast<uindex_t>(raw_idx);
     if (block_bucketize_pos_concat == nullptr) {
@@ -681,8 +684,7 @@ inline std::make_unsigned_t<index_t> block_bucketize_count_bucket(
             hi = mid;
         }
     }
-    const index_t lb = lo - first_off - 1;
-    *lb_out = lb;
+    lb = lo - first_off - 1;
     return (lb < static_cast<index_t>(my_size))
         ? static_cast<uindex_t>(lb)
         : (idx % static_cast<uindex_t>(my_size));
@@ -811,7 +813,7 @@ public:
                 index_t lb = 0;
                 p = block_bucketize_count_bucket(
                     indices_data_[i], t, my_size_, f,
-                    block_bucketize_pos_concat_, block_bucketize_pos_offsets_, &lb);
+                    block_bucketize_pos_concat_, block_bucketize_pos_offsets_, lb);
                 if (indices_to_lb_) indices_to_lb_[i] = lb;
             }
 

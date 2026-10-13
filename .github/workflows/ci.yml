@@ -397,6 +397,7 @@ jobs:
     needs: [ build, identify-changes ]
     if: needs.identify-changes.outputs.fbgemm-xpu == 'true'
     strategy:
+      max-parallel: 1
       matrix:
         # Testing in minimum and maximum supported versions of python.
         python-version: [ '3.10', '3.14' ]
@@ -473,11 +474,6 @@ jobs:
       run: |
         python -c "import torch; assert torch.xpu.is_available(), 'XPU (Intel GPU) is not available'"
     - name: 'Test fbgemm-xpu'
-      env:
-        # Both matrix entries share one GPU, so cap each launch-grid test at
-        # half of device memory. That skips the 12 and 18 GiB cases here; they
-        # run only when the tests are run manually without the variable.
-        FBGEMM_XPU_TEST_SHARED_GPU: '1'
       run: |
         # Upstream FBGEMM tests (patched) cover shared operator behavior and parity.
         # The tests below cover XPU/SYCL cases that upstream does not:

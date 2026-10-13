@@ -107,7 +107,7 @@ The plugin tests cover XPU/SYCL specific cases that upstream does not, such as l
 pytest -rsf $TORCHLIB_XPU_PATH/packages/fbgemm-xpu/tests/
 ```
 
-The launch-grid tests in `test_jagged_large_grid.py` and `test_jagged_loop_bounds_overflow.py` need 3-18 GiB of device memory and are skipped when the device does not have it free. They are the only guard against an int32 launch-grid overflow silently dropping work, so run them on a large-memory device before changing jagged kernel launch geometry. CI sets `FBGEMM_XPU_TEST_SHARED_GPU=1`, which also skips any of them needing more than half of the device's memory, because two test jobs share one GPU there; leave it unset for manual runs.
+The launch-grid tests in `test_jagged_large_grid.py` and `test_jagged_loop_bounds_overflow.py` need 3-18 GiB of device memory and are skipped when the device does not have it free. They are the only guard against an int32 launch-grid overflow silently dropping work, so run them on a large-memory device before changing jagged kernel launch geometry.
 
 The upstream FBGEMM tests cover shared operator behavior and parity with the CPU implementation. To setup the testing environment, apply the tests patch to the pinned FBGEMM release:
 

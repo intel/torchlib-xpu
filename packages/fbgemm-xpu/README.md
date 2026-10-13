@@ -56,10 +56,10 @@ operators, registered under the `torch.ops.fbgemm` namespace.
   - Does not support pruning/index remapping, mixed dimensions, `torch.compile`,
     or FakeTensor execution.
 
-The following operators are also implemented but do not constitute
-public documented FBGEMM API. These are extra variants, helpers, or utility
-operators alongside the operators above. You can find their exact signature in
-[ops_registry.cpp](src/fbgemm_xpu/ops_registry.cpp):
+The following operators are also implemented but are outside FBGEMM's Stable
+API. This list includes operators documented under FBGEMM's Other API alongside
+internal variants, helpers, and utility operators. You can find their exact
+signature in [ops_registry.cpp](src/fbgemm_xpu/ops_registry.cpp):
 
 - `asynchronous_exclusive_cumsum`
 - `asynchronous_inclusive_cumsum`

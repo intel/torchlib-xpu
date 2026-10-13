@@ -1,4 +1,4 @@
-From 7560bb64074a3d0372130a041544a323b64cf10e Mon Sep 17 00:00:00 2001
+From 795bb9ccc4d83bd21c3c1697a6382893ac8e07a9 Mon Sep 17 00:00:00 2001
 From: Alberto Gallegos <alberto.gallegos.muro@intel.com>
 Date: Thu, 9 Jul 2026 18:28:28 +0000
 Subject: [PATCH] Add XPU support to FBGEMM sparse ops and jagged tensor tests
@@ -50,10 +50,10 @@ stacked_jagged_2d_to_dense need fbgemm::offsets_range and a cub::DeviceScan
 equivalent, so those two tests are skipped. elementwise_binary_test.py covers
 jagged_dense_elementwise_add, jagged_dense_elementwise_add_jagged_output and
 jagged_dense_elementwise_mul on the accelerator, including the vectorized Half
-fast path and the torch.compile dynamic-shape path. Its Half fast-path test is
-gated on accelerator_unavailable, and the jagged_dense_elementwise_mul backward
-large-grid regression on accelerator_unavailable and accelerator_memory_lt_gb(32),
-so it runs on accelerators with at least 32 GB of memory.
+fast path and dynamic-shape cases. Its Half fast-path test is gated on
+accelerator_unavailable, and the jagged_dense_elementwise_mul backward large-grid
+regression on accelerator_unavailable and accelerator_memory_lt_gb(32), so it
+runs on accelerators with at least 32 GB of memory.
 
 Enable test_all_to_one_device in merge_pooled_embeddings_test.py on the
 current accelerator through the shared accelerator helpers. The class-level

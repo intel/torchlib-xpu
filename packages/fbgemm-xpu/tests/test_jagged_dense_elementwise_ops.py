@@ -41,6 +41,18 @@ _E = 8
 _MAX_L = 2
 
 
+@pytest.fixture
+def fill_uninitialized_memory():
+    """Make an unwritten output observable as NaN instead of stale bytes."""
+    deterministic = torch.are_deterministic_algorithms_enabled()
+    fill = torch.utils.deterministic.fill_uninitialized_memory
+    torch.use_deterministic_algorithms(True)
+    torch.utils.deterministic.fill_uninitialized_memory = True
+    yield
+    torch.utils.deterministic.fill_uninitialized_memory = fill
+    torch.use_deterministic_algorithms(deterministic)
+
+
 def _jagged_args(dtype, max_l=_MAX_L):
     """CPU arguments whose second batch row is truncated by max_l."""
     generator = torch.Generator().manual_seed(0)
@@ -104,13 +116,12 @@ def test_mul_backward_low_precision(dtype):
     assert torch.equal(y.grad.cpu(), y_ref.grad.to(dtype))  # nosec B101
 
 
+@pytest.mark.usefixtures("fill_uninitialized_memory")
 @pytest.mark.parametrize("dtype", _DTYPES)
 def test_mul_empty_dense_is_zero(dtype):
     """An empty dense operand gives x * 0, as on CPU, not uninitialized memory."""
     x_values, offsets, dense = _jagged_args(dtype, max_l=0)
     assert dense.numel() == 0 and x_values.numel() > 0  # nosec B101
-    # Leave non-zero garbage in the caching allocator for the outputs to reuse.
-    torch.full((64, _E), float("nan"), dtype=dtype, device="xpu")
 
     output = torch.ops.fbgemm.jagged_dense_elementwise_mul_forward(
         x_values.xpu(), [offsets.xpu()], dense.xpu()

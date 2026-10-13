@@ -549,7 +549,7 @@ inline JaggedLaunchConfig check_shape_and_partition_(
     // DIVERGENCE FROM CUDA, which uses
     //   inner_dense_size >= kWarpSize / 2 ? kWarpSize : inner_dense_size.
     // That threshold accounts for the two-elements-per-work-item inner loops in
-    // both consuming kernels, but the value does not: they stride over
+    // all three consuming kernels, but the value does not: they stride over
     // inner_dense_size / 2 pairs, so the inner axis needs only
     // ceil(inner_dense_size / 2) lanes. CUDA's value over-provisions for every
     // inner_dense_size < 2 * kWarpSize, worst at exactly kWarpSize / 2, where the
@@ -578,17 +578,19 @@ inline JaggedLaunchConfig check_shape_and_partition_(
     // (-fsycl-id-queries-fit-in-int) that the TOTAL work-item count fits in an
     // int, and queue::submit throws once blocks * threads_y * threads_x passes
     // INT32_MAX. Because threads_x <= inner_dense_size above, that product is at
-    // most the dense operand's numel, so reaching the limit needs an over-limit
-    // numel too - only the dense-output consumer accepts one, via its
-    // packed_accessor64 fallback. Smallest such launch: inner_dense_size >= 63,
-    // so threads_x saturates at kWarpSize, with outer * folded >= ~67M.
-    // Capping is safe because both consumers of this config (the dense-output and
-    // jagged-output kernels) iterate their outer index with a group-stride loop,
-    // so a smaller launch still covers every row. The jagged-output consumer
-    // re-derives blocks from nnz rather than from outer * folded, so it must
-    // re-apply the same cap itself - see FBGEMM_XPU_JAGGED_OUTPUT_INVOKE_BODY,
-    // whose cap is now defensive only: it builds packed_accessor32
-    // unconditionally, so ATen rejects an over-limit numel before the launch.
+    // most the dense operand's numel plus the final work-group round-up. The
+    // generic dense-output consumer accepts an over-limit numel through its
+    // packed_accessor64 fallback. The jagged-jagged dense-output consumer uses
+    // packed_accessor32, but at D = 1 the round-up can still push a legal numel
+    // over the launch limit.
+    //
+    // Capping is safe because all three consumers of this config iterate their
+    // outer index with a group-stride loop, so a smaller launch still covers
+    // every row. The jagged-output consumer re-derives blocks from nnz rather
+    // than from outer * folded, so it must re-apply the same cap itself - see
+    // FBGEMM_XPU_JAGGED_OUTPUT_INVOKE_BODY. It builds packed_accessor32
+    // unconditionally, but the D = 1 work-group round-up can likewise reach the
+    // cap while numel remains legal.
     const int64_t blocks = std::max<int64_t>(
         1,
         static_cast<int64_t>(xpu_cap_grid_dim_x(

@@ -10,12 +10,11 @@ backward:
 
 | Hardware | Timings | Run notes |
 | --- | --- | --- |
-| Intel® Data Center GPU Max 1550 (PVC), one tile | [pvc-max1550/jagged_tensor.csv](pvc-max1550/jagged_tensor.csv) | [pvc-max1550/README.md](pvc-max1550/README.md) |
-| Intel® Arc™ Pro B60 Graphics (BMG) | [bmg-b60/jagged_tensor.csv](bmg-b60/jagged_tensor.csv) | [bmg-b60/README.md](bmg-b60/README.md) |
+| Intel® Arc™ Pro B60 Graphics (BMG) | [bmg-b60/jagged_tensor.csv](bmg-b60/jagged_tensor.csv) | [bmg-b60/jagged_tensor.md](bmg-b60/jagged_tensor.md) |
 
 Each CSV is a plain table, so GitHub renders it. The command, date, device,
 driver, versions and sweep definition of the run that produced it are in the
-`README.md` beside it, in the form the sweep writes them.
+`jagged_tensor.md` beside it, as the sweep writes them.
 
 ## Reproduce
 
@@ -35,23 +34,11 @@ The sweep writes two files: `jagged_tensor.csv` with the timings, and
 `jagged_tensor.md` with the run's command, date, device, driver, versions and
 sweep definition.
 
-The PVC baseline was recorded when jagged-sweep was a case of the patched
-upstream script, so its notes show that command and an `fbgemm_checkout`
-line. It also predates the GPU lead described under Timing below, so its
-`timing` line does not mention it. Rerunning PVC rows with the lead matched
-the smallest and largest shapes within noise, and made some mid-size rows,
-around 40 to 60 µs, up to 10% faster: the 384 MB flush only partly hid the
-host there.
-
 The BMG baseline was recorded on one B60 in a Kubernetes pod limited to 4
-CPUs, with `OMP_NUM_THREADS=4`. Both baselines predate the clean flush
-described under Timing below; they were taken with a zero fill. On PVC that
-fill leaves L2 dirty just as an in-place negation does, so every row includes
-write-back the clean flush keeps out of the timed window, and rows for shapes
-that fit in the 192 MB L2 can be about twice as slow as a rerun: a copy of
-half the L2 took 314 µs after a zero fill and 139 µs after a clean flush. On
-a B60 a zero fill timed within 2% of a clean flush, so its rows should hold
-until the baseline is rerun.
+CPUs, with `OMP_NUM_THREADS=4`. A second run on the same pod agreed with it
+within the noise given under Reading the numbers, and so did an earlier
+recording taken with upstream's zero fill in place of the flush described
+under Timing below: on a B60 the two flushes time alike.
 
 ## What the sweep measures
 
@@ -111,20 +98,15 @@ achieves.
 ### Reading the numbers
 
 - Small shapes are latency-bound. Below a few MB of traffic the time floors,
-  at about 14 µs on PVC and 5 µs on BMG, whatever the size, and their GB/s
-  does not reflect bandwidth. Use them to catch kernel latency regressions.
-  Without the GPU lead, BMG reported 100 µs to 1 ms here: the 36 MB flush is
-  too short to keep the GPU busy while the host submits, so the timed window
-  measured the host instead.
+  at about 5 µs on BMG, whatever the size, and their GB/s does not reflect
+  bandwidth. Use them to catch kernel latency regressions.
 - Shapes whose operands fit in the last-level cache (192 MB per PVC tile,
   18 MB on B60) start from device memory, as the flush evicts them. The
   alternative, upstream's fixed 40 MB flush, leaves PVC operands in L2 and
   reports up to twice the tile's HBM bandwidth.
-- Run to run, PVC times varied by a median of 0.7%, a 95th percentile of
-  2.8% and at most 5.5%, the last on shapes under 60 µs. BMG times varied by
-  a median of 0.1%, a 95th percentile of 1.2% and at most 4.9%, again on
-  shapes under 60 µs; rows over 60 µs stayed within 1%. Treat changes smaller
-  than that as noise.
+- Run to run, BMG times varied by a median of 0.1%, a 95th percentile of
+  1.0% and at most 4.1%, on shapes under 60 µs; rows over 60 µs stayed
+  within 3%. Treat changes smaller than that as noise.
 - For reference, a large (2 GB) `copy_` streams at about 1.05 TB/s on one
   PVC tile with this helper, and at about 400 GB/s on a B60, whose memory is
   rated at 456 GB/s.

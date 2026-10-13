@@ -6,14 +6,14 @@ Columns: `family`, `direction`, `dtype`, `batch_size`, `max_len`, `embedding_dim
 | Key | Value |
 | --- | --- |
 | command | python -m fbgemm_xpu.bench.jagged_sweep --output jagged_tensor.csv |
-| date_utc | 2026-10-03T00:10:21+00:00 |
+| date_utc | 2026-10-13T03:15:29+00:00 |
 | device | Intel(R) Arc(TM) Pro B60 Graphics |
 | driver | 1.17.39395+13 |
 | ze_affinity_mask | 0 |
 | torch | 2.14.1+xpu |
 | fbgemm_gpu | 1.9.0 |
 | fbgemm_xpu | 0.8.0 |
-| timing | median of XPU event times, 2 warm-ups, 36 MB cache flush (2x last-level cache) per iteration, then a torch.xpu._sleep spin so the GPU does not wait for the host in the timed window |
+| timing | median of XPU event times, 2 warm-ups, 36 MB cache flush (2x last-level cache, written, then a second buffer read so the cache is left clean) per iteration, then a torch.xpu._sleep spin sized from the fastest warm-up so the GPU does not wait for the host in the timed window |
 | lengths | uniform integers in [0, max_len], one draw per shape |
 | batch_sizes | 32,128,512,2048 |
 | max_lens | 16,64,200,256,512,1024 |

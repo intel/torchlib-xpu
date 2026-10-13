@@ -1,4 +1,4 @@
-From c99656ad7fcae3911ab9f39c7f0079965598eeac Mon Sep 17 00:00:00 2001
+From 982cff347f7ecf394fbc89456a06fe898155fc0b Mon Sep 17 00:00:00 2001
 From: Alberto Gallegos <alberto.gallegos.muro@intel.com>
 Date: Thu, 9 Jul 2026 18:28:28 +0000
 Subject: [PATCH] Add XPU support to FBGEMM sparse ops and jagged tensor tests
@@ -61,17 +61,14 @@ gpu_unavailable skip moves to the individual tests, so the remaining tests,
 which cover merge_pooled_embeddings and sum_reduce_to_one (no XPU
 implementation), keep running on CUDA and skip automatically on XPU.
 
-Enable two more block bucketize tests on the current accelerator.
-test_block_bucketize_sparse_features_populate_large_grid in
-block_bucketize_test.py moves from gpu_unavailable and gpu_memory_lt_gb to
-accelerator_unavailable and accelerator_memory_lt_gb, so it checks the
-variable-batch launch over max_B * T > 2**32 work-items on XPU.
-block_bucketize_warp_amd_test.py compares block_bucketize_sparse_features_inference
-and populate_bucketized_permute with the CPU for sequences longer than 32; it
-imports fbgemm_xpu and its torch.cuda check becomes an accelerator check.
-test_populate_bucketized_permute_warp_parallel_large_grid stays gated on CUDA:
-on XPU it launches one work-item per row, far below the launch limit, while
-populate_bucketized_permute needs about 13 GiB at that size.
+Enable the block bucketize variable-batch large-grid test on the current
+accelerator. It moves from gpu_unavailable and gpu_memory_lt_gb to
+accelerator_unavailable and accelerator_memory_lt_gb, so it checks the launch
+over max_B * T > 2**32 work-items on XPU. Exact new_lengths and new_indices
+assertions prove that the capped launch grid-strides to the active feature
+beyond the first launch range. The populate_bucketized_permute warp-parallel
+large-grid and wavefront64 tests stay CUDA/ROCm-only because XPU uses a
+different serial kernel.
 
 Signed-off-by: Alberto Gallegos <alberto.gallegos.muro@intel.com>
 Signed-off-by: Felipe Leza Alvarez <felipe.leza.alvarez@intel.com>
@@ -79,24 +76,23 @@ Signed-off-by: mkrze <mateusz.krzemieniewski@intel.com>
 
 Co-authored-by: Felipe Leza Alvarez <felipe.leza.alvarez@intel.com>
 ---
- fbgemm_gpu/test/jagged/1d_to_dense_test.py    |  29 +--
+ fbgemm_gpu/test/jagged/1d_to_dense_test.py    |  29 ++-
  fbgemm_gpu/test/jagged/2d_to_dense_test.py    |  39 ++--
  fbgemm_gpu/test/jagged/common.py              |   1 +
  .../test/jagged/dense_to_jagged_test.py       |  19 +-
  .../test/jagged/elementwise_binary_test.py    |  14 +-
- .../jagged/expand_into_jagged_permute_test.py |  29 +--
+ .../jagged/expand_into_jagged_permute_test.py |  29 ++-
  .../jagged/jagged_index_select_2d_test.py     |  28 ++-
  .../test/merge_pooled_embeddings_test.py      |  31 ++-
- .../test/sparse/block_bucketize_test.py       | 178 ++++++++++--------
- .../sparse/block_bucketize_warp_amd_test.py   |   7 +-
+ .../test/sparse/block_bucketize_test.py       | 195 ++++++++++--------
  fbgemm_gpu/test/sparse/cumsum_test.py         |   4 +
  fbgemm_gpu/test/sparse/misc_ops_test.py       |  24 ++-
  .../sparse/permute_sparse_features_test.py    |  15 +-
  .../test/sparse/reorder_batched_test.py       |  47 +++--
  .../tbe/utils/generate_vbe_metadata_test.py   |  23 ++-
- .../tbe/utils/split_embeddings_utils_test.py  |  33 +++-
+ .../tbe/utils/split_embeddings_utils_test.py  |  33 ++-
  fbgemm_gpu/test/test_utils.py                 |  52 ++++-
- 17 files changed, 393 insertions(+), 180 deletions(-)
+ 16 files changed, 403 insertions(+), 180 deletions(-)
 
 diff --git a/fbgemm_gpu/test/jagged/1d_to_dense_test.py b/fbgemm_gpu/test/jagged/1d_to_dense_test.py
 index 387ee1010..9ceb293fb 100644
@@ -638,7 +634,7 @@ index f0db0e65b..4326f4d83 100644
          uncat_size = 2
          pooled_embeddings = [
 diff --git a/fbgemm_gpu/test/sparse/block_bucketize_test.py b/fbgemm_gpu/test/sparse/block_bucketize_test.py
-index e7c9837bf..040c8131d 100644
+index e7c9837bf..ac282c13f 100644
 --- a/fbgemm_gpu/test/sparse/block_bucketize_test.py
 +++ b/fbgemm_gpu/test/sparse/block_bucketize_test.py
 @@ -20,16 +20,32 @@ from .common import extend_test_class, open_source
@@ -1131,30 +1127,30 @@ index e7c9837bf..040c8131d 100644
      @optests.dontGenerateOpCheckTests(
          "large-grid GPU-memory-gated stress repro; opcheck variants only skip on "
          "CPU samples and add no op coverage (T191384137)"
-diff --git a/fbgemm_gpu/test/sparse/block_bucketize_warp_amd_test.py b/fbgemm_gpu/test/sparse/block_bucketize_warp_amd_test.py
-index 685ed8c1e..341d0f574 100644
---- a/fbgemm_gpu/test/sparse/block_bucketize_warp_amd_test.py
-+++ b/fbgemm_gpu/test/sparse/block_bucketize_warp_amd_test.py
-@@ -28,14 +28,17 @@ import unittest
- import fbgemm_gpu  # noqa: F401  # registers torch.ops.fbgemm operators
- import torch
+@@ -2229,8 +2245,21 @@ class BlockBucketizeTest(unittest.TestCase):
+         self.assertEqual(new_lengths.shape, (my_size * total_B,))
+         self.assertEqual(new_indices.shape, (indices.numel(),))
+         self.assertIsNone(new_weights)
+-        # Per-bucket lengths sum to total input length.
+-        self.assertEqual(int(new_lengths.sum().item()), int(lengths.sum().item()))
++        # Feature 2 is beyond the first capped launch range. Exact values,
++        # rather than only their sum, prove that the grid-stride loop reached
++        # it and populated length_to_feature_idx[1] with feature 2.
++        torch.testing.assert_close(
++            new_lengths.cpu(),
++            torch.tensor([2, 1, 0, 0], dtype=torch.int32),
++            rtol=0,
++            atol=0,
++        )
++        torch.testing.assert_close(
++            new_indices.cpu(),
++            torch.tensor([3, 7, 11], dtype=torch.int32),
++            rtol=0,
++            atol=0,
++        )
  
-+# Registers the XPU (Intel GPU) FBGEMM operator implementations.
-+import fbgemm_xpu  # noqa: F401, E402
-+
- 
- class BlockBucketizeWarpAmdTest(unittest.TestCase):
-     def test_warp_parallel_vs_reference_wavefront64(self) -> None:
-         """Warp-parallel populate_bucketized_permute must match the CPU
-         reference for sequences longer than 32 elements, which is the only
-         regime that exercises lanes 32-63 on wavefront64 (MI300/MI350)."""
--        if not torch.cuda.is_available():
--            self.skipTest("No GPU available")
-+        if torch.accelerator.current_accelerator() is None:
-+            self.skipTest("No accelerator available")
-         torch.manual_seed(42)
- 
-         # (my_size, block_size, lengths). Every config includes at least one
+     @unittest.skipIf(*gpu_unavailable)
+     # bucketized_lengths is int32[lengths_size * my_size] (~2.1 GiB at
 diff --git a/fbgemm_gpu/test/sparse/cumsum_test.py b/fbgemm_gpu/test/sparse/cumsum_test.py
 index ffacc8ce4..b2a25572d 100644
 --- a/fbgemm_gpu/test/sparse/cumsum_test.py

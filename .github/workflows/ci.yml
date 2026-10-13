@@ -521,7 +521,6 @@ jobs:
         pytest -rsf fbgemm_gpu/test/merge_pooled_embeddings_test.py
         pytest -rsf fbgemm_gpu/test/sparse/block_bucketize_test.py
         FBGEMM_XPU_BLOCK_BUCKETIZE_KERNEL=chunked pytest -rsf fbgemm_gpu/test/sparse/block_bucketize_test.py
-        pytest -rsf fbgemm_gpu/test/sparse/block_bucketize_warp_amd_test.py
         pytest -rsf fbgemm_gpu/test/sparse/cumsum_test.py
         pytest -rsf fbgemm_gpu/test/sparse/misc_ops_test.py
         pytest -rsf fbgemm_gpu/test/sparse/permute_sparse_features_test.py

@@ -15,7 +15,9 @@ module covers what it does not reach:
 * the ``_mul`` backward kernels at float16 and bfloat16, which gradcheck never
   runs (it upcasts to float32) and the CPU backward cannot compute for bfloat16;
 * the zero-filled result for an empty dense operand, where the CUDA kernels
-  write nothing.
+  write nothing;
+* the shape check on the forward ``x_values`` passed to the ``_mul`` backward,
+  which CPU and CUDA read out of bounds when it is smaller than ``grad_output``.
 """
 
 import fbgemm_xpu  # noqa: F401  - registers the fbgemm XPU operators
@@ -133,3 +135,20 @@ def test_mul_empty_dense_is_zero(dtype):
     assert torch.equal(output.cpu(), torch.zeros_like(x_values))  # nosec B101
     assert torch.equal(x_values_grad.cpu(), torch.zeros_like(x_values))  # nosec B101
     assert y_grad.shape == dense.shape  # nosec B101
+
+
+# The offsets place jagged rows 0-2 inside the dense tensor, so both shapes
+# would make the y gradient read past the end of x_values.
+@pytest.mark.parametrize(
+    "shape", [(2, _E), (4, _E - 1)], ids=["fewer_rows", "fewer_columns"]
+)
+def test_mul_backward_rejects_mismatched_x_values(shape):
+    grad_output, offsets, dense = _jagged_args(torch.float32)
+    x_values = torch.ones(shape)
+
+    with pytest.raises(
+        RuntimeError, match=r"x_values\.sizes\(\), .* != grad_output\.sizes\(\)"
+    ):
+        torch.ops.fbgemm.jagged_dense_elementwise_mul_backward(
+            grad_output.xpu(), [offsets.xpu()], dense.xpu(), x_values.xpu()
+        )

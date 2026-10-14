@@ -62,6 +62,10 @@
 //       allocates with at::empty_like, returns uninitialized values for a
 //       non-empty grad_output. The CPU implementation zero-fills both
 //       gradients.
+//   (2) x_values must have the shape of grad_output. The y gradient reads
+//       x_values at every row and column of grad_output that the offsets
+//       cover. CPU and CUDA do not check this, so a smaller x_values reads out
+//       of bounds there.
 //
 // OPERATOR COVERAGE:
 //   fbgemm::jagged_dense_elementwise_mul is registered upstream on the

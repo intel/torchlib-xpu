@@ -232,6 +232,14 @@ std::tuple<at::Tensor, at::Tensor> jagged_dense_elementwise_mul_backward_xpu(
     const at::Tensor& x_values) {
     SYCL_DEVICE_GUARD(grad_output);
 
+    // Deviation (2): the y gradient reads x_values at grad_output's positions.
+    TORCH_CHECK(
+        x_values.sizes() == grad_output.sizes(),
+        "x_values.sizes(), ",
+        x_values.sizes(),
+        " != grad_output.sizes(), ",
+        grad_output.sizes());
+
     // Deviation (1): the jagged-output launcher writes nothing for an empty y.
     at::Tensor x_values_grad = y.numel() == 0 ? at::zeros_like(grad_output)
                                               : at::empty_like(grad_output);

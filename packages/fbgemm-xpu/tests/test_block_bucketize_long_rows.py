@@ -270,3 +270,36 @@ def test_rejects_unknown_kernel(monkeypatch):
             lengths, indices, block_sizes, 2, kwargs, DEVICE,
             sequence=True, bucketize_pos=False,
         )
+
+
+def test_forced_chunked_respects_count_buffer_limit(monkeypatch):
+    # 8192 rows of 1024 indices in 64 buckets need 270336 x 64 chunk counts,
+    # just over the 2**24 limit, so even a forced chunked call must take the
+    # serial kernel and allocate no more than it.
+    my_size = 64
+    lengths, indices, block_sizes, _ = _make_case(
+        [1024] * 8192, my_size, offset_dtype=torch.int32, index_dtype=torch.int32
+    )
+    lengths, indices, block_sizes = (t.to(DEVICE) for t in (lengths, indices, block_sizes))
+
+    def run(kernel):
+        monkeypatch.setenv(ENV, kernel)
+        torch.xpu.synchronize()
+        torch.xpu.reset_peak_memory_stats()
+        start = torch.xpu.memory_allocated()
+        outputs = torch.ops.fbgemm.block_bucketize_sparse_features_inference(
+            lengths, indices, False, True, block_sizes, my_size, None,
+            return_bucket_mapping=True,
+        )
+        torch.xpu.synchronize()
+        return outputs, torch.xpu.max_memory_allocated() - start
+
+    serial, serial_peak = run("serial")
+    chunked, chunked_peak = run("chunked")
+    for name, got, want in zip(OUTPUTS, chunked, serial):
+        assert (got is None) == (want is None), name  # nosec B101
+        if want is not None:
+            torch.testing.assert_close(
+                got, want, rtol=0, atol=0, msg=lambda message, name=name: f"{name}: {message}"
+            )
+    assert chunked_peak <= serial_peak, (chunked_peak, serial_peak)  # nosec B101

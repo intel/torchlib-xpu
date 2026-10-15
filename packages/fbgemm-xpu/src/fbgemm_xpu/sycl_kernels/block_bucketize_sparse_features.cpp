@@ -34,6 +34,8 @@
  * pooled rows too. It is chosen for at most kChunkedMaxRows rows with a
  * mean length of at least kChunkedMinMeanRowLength; set
  * FBGEMM_XPU_BLOCK_BUCKETIZE_KERNEL=serial|chunked to force one path.
+ * Both auto and chunked take the serial path when the chunk count buffer
+ * would exceed kChunkedMaxCounts.
  *
  * SYCL PORT MAPPING TO FBGEMM CUDA SOURCE
  *   (FBGEMM v1.9.0, fbgemm_gpu/src/sparse_ops/sparse_block_bucketize_features.cu)
@@ -1076,22 +1078,30 @@ static int64_t chunked_max_chunks(int64_t lengths_sum, int64_t lengths_size) {
     return div_round_up(lengths_sum, kChunkSize) + lengths_size;
 }
 
+static bool chunked_counts_fit(
+        int64_t lengths_sum, int64_t lengths_size, int64_t my_size) {
+    return my_size > 0 &&
+        chunked_max_chunks(lengths_sum, lengths_size) <= kChunkedMaxCounts / my_size;
+}
+
 static bool use_chunked_block_bucketize(
         int64_t lengths_sum, int64_t lengths_size, int64_t my_size) {
     const char* choice = std::getenv("FBGEMM_XPU_BLOCK_BUCKETIZE_KERNEL");
     if (choice != nullptr && std::strcmp(choice, "serial") == 0) {
         return false;
     }
+    // Forcing the chunked kernel overrides the speed heuristics, not the
+    // count buffer limit.
     if (choice != nullptr && std::strcmp(choice, "chunked") == 0) {
-        return true;
+        return chunked_counts_fit(lengths_sum, lengths_size, my_size);
     }
     TORCH_CHECK(
         choice == nullptr || choice[0] == '\0' || std::strcmp(choice, "auto") == 0,
         "FBGEMM_XPU_BLOCK_BUCKETIZE_KERNEL must be auto, serial or chunked, got '",
         choice, "'");
-    return lengths_size > 0 && lengths_size <= kChunkedMaxRows && my_size > 0 &&
+    return lengths_size > 0 && lengths_size <= kChunkedMaxRows &&
         lengths_sum >= kChunkedMinMeanRowLength * lengths_size &&
-        chunked_max_chunks(lengths_sum, lengths_size) <= kChunkedMaxCounts / my_size;
+        chunked_counts_fit(lengths_sum, lengths_size, my_size);
 }
 
 static void block_bucketize_chunked_xpu(
@@ -1172,7 +1182,7 @@ static void block_bucketize_chunked_xpu(
                                 indices_to_lb_data));
                     });
 
-                    const auto chunk_counts_cumsum = chunk_counts.cumsum(0);
+                    chunk_counts.cumsum_(0);
 
                     queue.submit([&](sycl::handler& cgh) {
                         cgh.parallel_for<BlockBucketizeChunkLengthsKernel<offset_t>>(
@@ -1182,7 +1192,7 @@ static void block_bucketize_chunked_xpu(
                             BlockBucketizeChunkLengthsKernel<offset_t>(
                                 lengths_size, my_size,
                                 chunk_offsets.data_ptr<offset_t>(),
-                                chunk_counts_cumsum.data_ptr<int64_t>(),
+                                chunk_counts.data_ptr<int64_t>(),
                                 new_lengths.data_ptr<offset_t>()));
                     });
 
@@ -1199,7 +1209,7 @@ static void block_bucketize_chunked_xpu(
                                     lengths_size, B, my_size,
                                     offsets.data_ptr<offset_t>(),
                                     chunk_offsets.data_ptr<offset_t>(),
-                                    chunk_counts_cumsum.data_ptr<int64_t>(),
+                                    chunk_counts.data_ptr<int64_t>(),
                                     indices_contig.data_ptr<index_t>(),
                                     weights_data,
                                     block_sizes.data_ptr<index_t>(),

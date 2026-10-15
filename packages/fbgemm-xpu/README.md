@@ -157,7 +157,8 @@ results, the sweep definition and the committed baselines. See also
   - `serial`: always the serial kernel.
   - `chunked`: always the chunked kernel.
 
-  Any other value raises an error.
+  With `auto` and `chunked`, inputs whose chunk counts would need more than
+  128 MiB take the serial kernel. Any other value raises an error.
 
 ## Known limitations
 

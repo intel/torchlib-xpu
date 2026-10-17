@@ -145,7 +145,20 @@ results, the sweep definition and the committed baselines. See also
 
 ## Environment variables
 
-Environment variables will be added as new FBGEMM operators are integrated into this project.
+* `FBGEMM_XPU_BLOCK_BUCKETIZE_KERNEL` selects the kernel used by
+  `block_bucketize_sparse_features` and
+  `block_bucketize_sparse_features_inference`. Both kernels return identical
+  results.
+
+  - `auto` (default, also when unset or empty): the chunked kernel, which
+    processes chunks of a row in parallel, for at most 8192 rows with a mean
+    row length of at least 128; otherwise the serial kernel, which processes
+    each row with one work-item.
+  - `serial`: always the serial kernel.
+  - `chunked`: always the chunked kernel.
+
+  With `auto` and `chunked`, inputs whose chunk counts would need more than
+  128 MiB take the serial kernel. Any other value raises an error.
 
 ## Known limitations
 

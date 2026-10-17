@@ -315,6 +315,15 @@ void XpuDeviceInterface::initialize_video_decoding(
   }
 }
 
+std::string XpuDeviceInterface::get_details() {
+  if (!has_decoded_frame_) {
+    return "XpuDeviceInterface: Fallback status unknown (No frames decoded).";
+  }
+  return std::string("XpuDeviceInterface: Using ") + 
+      (using_cpu_fallback_ ? "CPU fallback. " : "XPU/VAAPI.");
+}
+
+
 void XpuDeviceInterface::register_hardware_device_with_codec(
     AVCodecContext* codec_context) {
   if (ctx_) {
@@ -473,6 +482,8 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output(
     } else {
       frame_output.data = torch::stable::to(cpuFrameOutput.data, device_);
     }
+    has_decoded_frame_ = true;
+    using_cpu_fallback_ = true;
     return;
   }
 
@@ -505,6 +516,8 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output(
   if (!convert_av_frame_to_frame_output_with_sycl(av_frame, dst)) {
     convert_av_frame_to_frame_output_with_filter_graph(av_frame, dst);
   }
+  has_decoded_frame_ = true;
+  using_cpu_fallback_ = false;
 
   auto end = std::chrono::high_resolution_clock::now();
 

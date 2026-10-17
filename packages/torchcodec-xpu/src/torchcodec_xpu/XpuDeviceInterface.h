@@ -25,6 +25,8 @@ class XpuDeviceInterface : public DeviceInterface {
       const UniqueDecodingAVFormatContext& av_format_ctx,
       const VideoStreamOptions& video_stream_options) override;
 
+  std::string get_details() override;
+
   void register_hardware_device_with_codec(AVCodecContext* codec_context) override;
 
   void convert_av_frame_to_frame_output(
@@ -53,6 +55,8 @@ class XpuDeviceInterface : public DeviceInterface {
   VideoStreamOptions video_stream_options_;
   AVRational time_base_;
   bool has_fp64_;
+  bool has_decoded_frame_ = false;
+  bool using_cpu_fallback_ = false;
 
   UniqueAVBufferRef ctx_;
 

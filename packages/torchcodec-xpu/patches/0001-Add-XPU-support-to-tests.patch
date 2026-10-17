@@ -5,10 +5,11 @@ Subject: [PATCH] Add XPU support to tests
 
 Signed-off-by: Edgar Romo Montiel <edgar.romo.montiel@intel.com>
 ---
- test/conftest.py | 19 +++++++++++++++++--
- test/test_ops.py | 14 ++++++++++++++
- test/utils.py    | 17 +++++++++++++++++
- 3 files changed, 48 insertions(+), 2 deletions(-)
+ test/conftest.py      | 15 +++++++++++++++
+ test/test_decoders.py | 16 ++++++++++++++++
+ test/test_ops.py      | 14 ++++++++++++++
+ test/utils.py         | 17 +++++++++++++++++
+ 4 files changed, 62 insertions(+)
 
 diff --git a/test/conftest.py b/test/conftest.py
 --- a/test/conftest.py
@@ -92,6 +93,34 @@ index 09c9c491..ba33bd0b 100644
  
  class TestAudioDecoderOps:
      @pytest.mark.parametrize(
+diff --git a/test/test_decoders.py b/test/test_decoders.py
+--- a/test/test_decoders.py
++++ b/test/test_decoders.py
+@@ -118,3 +118,4 @@ from .utils import (
+     needs_cuda,
++    needs_xpu,
+     needs_ffmpeg_cli,
+     needs_heic,
+@@ -2813,3 +2813,18 @@ class TestVideoDecoder:
+ 
++    @needs_xpu
++    def test_cpu_fallback_on_xpu(self):
++        decoder, _ = make_video_decoder(NASA_VIDEO.path, device="xpu")
++        assert not decoder.cpu_fallback.status_known
++
++        frame = decoder[0]
++        assert frame.device.type == "xpu"
++        assert decoder.cpu_fallback.status_known
++
++        force_cpu_fallback = (
++            os.getenv("FORCE_CPU_FALLBACK", "false").lower()
++            in {"1", "true", "on"}
++        )
++        assert bool(decoder.cpu_fallback) == force_cpu_fallback
++
+     @needs_cuda
+     def test_beta_backend_still_supported_for_bc(self):
+
 diff --git a/test/utils.py b/test/utils.py
 index 5a72a804..ca8ee597 100644
 --- a/test/utils.py

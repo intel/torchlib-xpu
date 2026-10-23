@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <cstdio>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <filesystem>
@@ -224,6 +225,21 @@ UniqueAVFrame allocNV12Frame(
 
 } // namespace xpu
 
+struct StandaloneVaapiImport{
+  UniqueAVFrame frame;
+  VADRMPRIMESurfaceDescriptor descriptor{};
+  ze_context_handle_t context = nullptr;
+  void* pointer = nullptr;
+  ~StandaloneVaapiImport() {
+    if (pointer) zeMemFree(context, pointer);
+    for (uint32_t index = 0; index < descriptor.num_objects; ++index) {
+      if (descriptor.objects[index].fd >=0  ) {
+        close(descriptor.objects[index].fd);
+      }
+    }
+  }
+};
+
 int get_device_index(const StableDevice& device) {
   // PyTorch uses int8_t as its torch::DeviceIndex, but FFmpeg and XPU
   // libraries use int. So we use int, too.
@@ -250,8 +266,9 @@ XpuDeviceInterface::XpuDeviceInterface(const StableDevice& device)
   // This is a dummy tensor to initialize the xpu context.
   torch::stable::Tensor dummyTensorForXpuInitialization = torch::stable::empty(
       {1}, kStableUInt8, std::nullopt, StableDevice(device));
-
-  auto arch = xpu::getArchitecture(device);
+  
+  device_ = dummyTensorForXpuInitialization.device();
+  auto arch = xpu::getArchitecture(device_);
   if (!xpu::force_cpu_fallback()) {
     // Checking for devices which don't have HW media engines so we can skip
     // initialization of VAAPI context.
@@ -269,7 +286,7 @@ XpuDeviceInterface::XpuDeviceInterface(const StableDevice& device)
     DEBUG_LOG(xpu::INFO, "Backend: VAAPI_FILTER (Flexible, with scaling)");
   }
 
-  has_fp64_ = xpu::has_fp64(device);
+  has_fp64_ = xpu::has_fp64(device_);
   DEBUG_LOG(xpu::INFO, "Device supports FP64: " << has_fp64_);
 }
 
@@ -315,6 +332,26 @@ void XpuDeviceInterface::initialize_video_decoding(
   }
 }
 
+void XpuDeviceInterface::initialize_color_conversion(
+    const VideoStreamOptions& video_stream_options,
+    const std::vector<std::unique_ptr<Transform>>& transforms,
+    const std::optional<FrameDims>& resized_output_dims) {
+  TORCH_CHECK(
+    transforms.empty(),
+    "XPU color conversion does not support transforms");
+  TORCH_CHECK(
+    !resized_output_dims.has_value(),
+    "XPU color conversion does not support resized output dimensions");
+
+  video_stream_options_ = video_stream_options;
+
+  if (xpu::cpu_fallback()) {
+    ensure_cpu_interface();
+    cpu_interface_->initialize_color_conversion(
+      video_stream_options, transforms, resized_output_dims);
+  }
+}
+
 std::string XpuDeviceInterface::get_details() {
   if (!has_decoded_frame_) {
     return "XpuDeviceInterface: Fallback status unknown (No frames decoded).";
@@ -338,6 +375,63 @@ VADisplay getVaDisplayFromAV(AVFrame* avFrame) {
   AVVAAPIDeviceContext* vactx = (AVVAAPIDeviceContext*)hwdc->hwctx;
   return vactx->display;
 }
+
+void XpuDeviceInterface::make_frame_standalone(UniqueAVFrame& frame) {
+  TORCH_CHECK(frame != nullptr, "Decoded frame is null");
+  TORCH_CHECK(frame->format == AV_PIX_FMT_VAAPI, 
+    "Only VAAPI frames can be made standalone", 
+    "software-frame upload is not implemented");
+}
+
+std::optional<torch::stable::Tensor> XpuDeviceInterface::get_frame_storage(
+  const AVFrame& frame) const {
+    TORCH_CHECK(frame.format == AV_PIX_FMT_VAAPI && frame.hw_frames_ctx, 
+      "Expected a VAAPI frame with a hardware frame context");
+    auto owner = std::make_shared<StandaloneVaapiImport>();
+    owner->frame.reset(av_frame_clone(&frame));
+    TORCH_CHECK(owner->frame != nullptr, "Failed to clone VAAPI frame");
+    auto display = getVaDisplayFromAV(owner->frame.get());
+    auto surface = static_cast<VASurfaceID>(reinterpret_cast<uintptr_t>(frame.data[3]));
+    TORCH_CHECK(vaSyncSurface(display, surface) == VA_STATUS_SUCCESS, "Failed to sync VAAPI surface");
+    TORCH_CHECK(vaExportSurfaceHandle(display, surface,
+        VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2, VA_EXPORT_SURFACE_READ_ONLY,
+        &owner->descriptor) == VA_STATUS_SUCCESS, "Failed to export VAAPI surface");
+    TORCH_CHECK(owner->descriptor.num_objects == 1, "Expected single DMA-BUF allocation");
+    
+    sycl::queue queue = c10::xpu::getCurrentXPUStream(device_.index());
+    ze_device_handle_t native_device{};
+
+    queue
+      .submit([&](sycl::handler& cgh) {
+        cgh.host_task([&](const sycl::interop_handle& ih) {
+          owner->context = ih.get_native_context<sycl::backend::ext_oneapi_level_zero>();
+          native_device = ih.get_native_device<sycl::backend::ext_oneapi_level_zero>();
+        });
+      })
+      .wait();
+
+    ze_external_memory_import_fd_t import{};
+    import.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
+    import.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
+    // import.fd = owner->descriptor.objects[0].fd;
+    ze_device_mem_alloc_desc_t allocation{};
+    allocation.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+    allocation.pNext = &import;
+    auto size = static_cast<int64_t>(owner->descriptor.objects[0].size);
+
+    const int fd = owner->descriptor.objects[0].fd;
+    import.fd = fd;
+    const ze_result_t result = zeMemAllocDevice(
+      owner->context, &allocation, size, 0, 
+      native_device, &owner->pointer);
+
+    TORCH_CHECK(result == ZE_RESULT_SUCCESS, "DMA-BUF import failed");
+    close(fd);
+    owner->descriptor.objects[0].fd = -1;
+    
+    return torch::stable::from_blob(owner->pointer, {size}, {1}, 
+      device_, kStableUInt8, [owner](void*) {});    
+  }
 
 struct xpuManagerCtx {
   UniqueAVFrame avFrame;

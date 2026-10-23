@@ -6,10 +6,10 @@ Subject: [PATCH] Add XPU support to tests
 Signed-off-by: Edgar Romo Montiel <edgar.romo.montiel@intel.com>
 ---
  test/conftest.py      | 15 +++++++++++++++
- test/test_decoders.py | 16 ++++++++++++++++
+ test/test_decoders.py | 37 ++++++++++++++++
  test/test_ops.py      | 14 ++++++++++++++
  test/utils.py         | 17 +++++++++++++++++
- 4 files changed, 62 insertions(+)
+ 4 files changed, 82 insertions(+), 1 deletion(-)
 
 diff --git a/test/conftest.py b/test/conftest.py
 --- a/test/conftest.py
@@ -120,6 +120,29 @@ diff --git a/test/test_decoders.py b/test/test_decoders.py
 +
      @needs_cuda
      def test_beta_backend_still_supported_for_bc(self):
+@@ -3813,2 +3829,21 @@ class TestLowLevel:
+-    @pytest.mark.parametrize("device", _low_level_devices())
++    @pytest.mark.parametrize(
++        "device",
++        (
++            *_low_level_devices(),
++            pytest.param(
++                "xpu",
++                marks=[
++                    pytest.mark.needs_xpu,
++                    pytest.mark.skipif(
++                        os.getenv("FORCE_CPU_FALLBACK", "false").lower()
++                        in {"1", "true", "on"},
++                        reason=(
++                            "Issue 1: standalone software-frame upload to XPU "
++                            "is not implemented yet"
++                        ),
++                    ),
++                ],
++            ),
++        ),
++    )
+     def test_block_output_types(self, device):
 
 diff --git a/test/utils.py b/test/utils.py
 index 5a72a804..ca8ee597 100644

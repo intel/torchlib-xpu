@@ -54,7 +54,9 @@ from fbgemm_xpu.bench.run_notes import notes_markdown, notes_path, run_metadata
 
 _MODULE = "fbgemm_xpu.bench.tbe_training"
 
-# The optimiser and weight initialisation of upstream's tbe_training_benchmark.
+# The optimiser of upstream's tbe_training_benchmark, and the weight range it
+# uses for INT8; for FP32 and FP16 upstream keeps the modules' own
+# initialisation, zeros for split and standard normal for dense.
 LEARNING_RATE = 0.1
 EPS = 0.1
 WEIGHTS_INIT_BOUND = 0.0003

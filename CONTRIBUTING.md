@@ -137,7 +137,11 @@ pytest -rsf fbgemm_gpu/test/sparse/permute_sparse_features_test.py
 pytest -rsf fbgemm_gpu/test/sparse/reorder_batched_test.py
 pytest -rsf fbgemm_gpu/test/tbe/utils/generate_vbe_metadata_test.py
 pytest -rsf fbgemm_gpu/test/tbe/utils/split_embeddings_utils_test.py
+pytest -rsf fbgemm_gpu/test/tbe/bench/tbe_data_config_loader_test.py
+pytest -rsf fbgemm_gpu/test/tbe/bench/tbe_data_config_models_test.py
 ```
+
+The two `tbe/bench` tests run unpatched. They cover `TBEDataConfig` loading and serialisation, which the TBE training benchmark's committed workload configs rely on.
 
 ## How to benchmark Intel® plugin for FBGEMM
 
@@ -173,6 +177,23 @@ ZE_AFFINITY_MASK=0 python fbgemm_gpu/bench/jagged_tensor_benchmark.py device --b
 ```
 
 The other upstream benchmark cases don't use any XPU-implemented operator, so they are skipped on XPU. Run `python fbgemm_gpu/bench/jagged_tensor_benchmark.py --help` to list all cases and their options.
+
+### TBE training lookups
+
+The table batched embedding (TBE) training lookups are benchmarked with the `tbe-training` benchmark shipped in `fbgemm_xpu.bench`. It times the dense lookup and the split lookup with fused rowwise Adagrad, forward and backward, on the no-bag, unweighted path. Workloads are `TBEDataConfig` JSON files, committed in [`packages/fbgemm-xpu/bench/tbe/configs/`](packages/fbgemm-xpu/bench/tbe/configs/). Run it from the repository root on a single device with:
+
+```
+ZE_AFFINITY_MASK=0 python -m fbgemm_xpu.bench.tbe_training \
+  packages/fbgemm-xpu/bench/tbe/configs/{small,medium,large}.json \
+  --output tbe_training.csv
+```
+
+It can be narrowed with `--dtypes` (`float32`, `float16`), `--families` (`dense`, `split`) and `--iters`. The `--smoke` flag shrinks every config and runs few iterations, so its timings are not meaningful:
+
+```
+python -m fbgemm_xpu.bench.tbe_training --smoke \
+  packages/fbgemm-xpu/bench/tbe/configs/{small,medium,large}.json --output tbe_training_smoke.csv
+```
 
 ## Tips
 

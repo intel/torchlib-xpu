@@ -3,3 +3,4 @@
 
 dist/
 packages/torchcodec-xpu/src/torchcodec_xpu/version.py
+tinyllama-demo/

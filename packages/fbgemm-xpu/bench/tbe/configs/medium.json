@@ -1,0 +1,34 @@
+{
+  "D": 128,
+  "Ds": null,
+  "E": 1000000,
+  "Es": null,
+  "T": 8,
+  "batch_params": {
+    "B": 2048,
+    "Bs": null,
+    "sigma_B": null,
+    "vbe_distribution": "normal",
+    "vbe_num_ranks": null
+  },
+  "embedding_specs": null,
+  "feature_table_map": null,
+  "indices_params": {
+    "heavy_hitters": [],
+    "index_dtype": "torch.int64",
+    "offset_dtype": "torch.int64",
+    "zipf_q": 0.1,
+    "zipf_s": 0.1
+  },
+  "indices_params_list": null,
+  "max_indices": null,
+  "mixed_dim": false,
+  "pooling_params": {
+    "L": 20,
+    "Ls": null,
+    "length_distribution": "normal",
+    "sigma_L": null
+  },
+  "use_cpu": true,
+  "weighted": false
+}

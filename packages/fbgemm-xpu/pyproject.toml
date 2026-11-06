@@ -31,7 +31,8 @@ test = [
     "pytest",
     "hypothesis",
     "expecttest",
-    "click"
+    "click",
+    "pyyaml",
 ]
 
 [project.urls]

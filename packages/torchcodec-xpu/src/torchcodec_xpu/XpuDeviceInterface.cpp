@@ -406,8 +406,6 @@ torch::stable::Tensor AVFrameToTensor(
   TORCH_CHECK(
       res == ZE_RESULT_SUCCESS, "Failed to import fd=", desc.objects[0].fd);
 
-  close(desc.objects[0].fd);
-
   std::unique_ptr<DLManagedTensor> dl_dst = std::make_unique<DLManagedTensor>();
   int64_t* shape = (int64_t*)malloc(3*sizeof(int64_t));
 
@@ -635,8 +633,6 @@ bool XpuDeviceInterface::convert_av_frame_to_frame_output_with_sycl(
       &usm_ptr);
   TORCH_CHECK(
       res == ZE_RESULT_SUCCESS, "Failed to import fd=", desc.objects[0].fd);
-
-  close(desc.objects[0].fd);
 
   convertNV12ToRGB(
       queue,
@@ -920,7 +916,6 @@ UniqueAVFrame XpuDeviceInterface::convert_tensor_to_av_frame_for_encoding_with_s
       zeCtx, &alloc_desc, desc.objects[0].size, 0, zeDevice, &usm_ptr);
 
   if (res != ZE_RESULT_SUCCESS) {
-    close(desc.objects[0].fd);
     TORCH_CHECK(
         false,
         "zeMemAllocDevice failed importing encode surface fd=",
@@ -962,7 +957,6 @@ UniqueAVFrame XpuDeviceInterface::convert_tensor_to_av_frame_for_encoding_with_s
       codec_context->colorspace);
 
   zeMemFree(zeCtx, usm_ptr);
-  close(desc.objects[0].fd);
 
   vaFrame->colorspace  = codec_context->colorspace;
   vaFrame->color_range = codec_context->color_range;

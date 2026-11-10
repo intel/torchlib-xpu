@@ -32,7 +32,7 @@ device_backend = 'torchcodec_xpu:load_torchcodec_xpu_shared_library'
 test = [
     "numpy",
     "pillow",
-    "pytest",
+    "pytest~=9.1.1",
     "torcheval",
     "torchvision",
 ]

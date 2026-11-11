@@ -861,6 +861,8 @@ jobs:
         echo "$ML1M_PREPARED_SHA256  $E2E/data/data/ml-1m/sasrec_format.csv" | sha256sum -c -
     - name: 'Run DLRM-v3 training on XPU (train-eval smoke)'
       working-directory: gr-train
+      # The container's sh (dash) has no pipefail.
+      shell: bash
       run: |
         # Shortened copy of movielens_1m_xpu.gin: the overrides come last, and
         # gin keeps the last binding of a parameter.

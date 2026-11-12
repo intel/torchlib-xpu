@@ -544,8 +544,8 @@ jobs:
 
   # End-to-end DLRM-v3 on XPU across the integrated stack: fbgemm-xpu (built
   # above) + FBGEMM + TorchRec + generative-recommenders (DLRM-v3). Every
-  # external source is pinned to a commit in `env` below. How to run the same
-  # steps locally: packages/fbgemm-xpu/README.md, "End-to-end DLRM-v3 tests".
+  # external source is pinned to a commit in `env` below; the steps' logic is
+  # in .github/scripts/dlrm-v3, which read the pins from that environment.
   test-dlrm-v3:
     needs: [ build, identify-changes, test-fbgemm ]
     if: needs.identify-changes.outputs.dlrm-v3 == 'true'
@@ -595,13 +595,14 @@ jobs:
       run: |
         # Workspaces persist on self-hosted runners; start from a clean state.
         rm -rf .torchlib-xpu-venv _e2e _tools _wheels
-        rm -rf fbgemm-pr gr-train torchrec
+        rm -rf gr-train torchlib-xpu torchrec
     - name: 'Set AGENT_TOOLSDIRECTORY'
       run: |
         # For https://github.com/actions/setup-python/issues/1087
         echo "AGENT_TOOLSDIRECTORY=$GITHUB_WORKSPACE/_tools" >> $GITHUB_ENV
         echo "E2E=$GITHUB_WORKSPACE/_e2e" >> $GITHUB_ENV
         echo "VENV=$GITHUB_WORKSPACE/.torchlib-xpu-venv" >> $GITHUB_ENV
+        echo "SCRIPTS=$GITHUB_WORKSPACE/torchlib-xpu/.github/scripts/dlrm-v3" >> $GITHUB_ENV
     - name: 'Install prerequisites'
       run: |
         apt-get update
@@ -632,6 +633,10 @@ jobs:
       with:
         name: ${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}
         path: _wheels/
+    - name: 'Checkout torchlib-xpu'
+      uses: actions/checkout@v7
+      with:
+        path: torchlib-xpu
     - name: 'Checkout TorchRec'
       uses: actions/checkout@v7
       with:
@@ -659,177 +664,21 @@ jobs:
           "$(ls ./_wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/fbgemm_xpu*.whl)" \
           --extra-index-url https://download.pytorch.org/whl/xpu
     - name: 'Install TorchRec and DLRM-v3 dependencies'
+      env:
+        NUMPY_VERSION: ${{ matrix.numpy }}
+        PANDAS_VERSION: ${{ matrix.pandas }}
       run: |
-        torch_version=$(python -c "import torch; print(torch.__version__)")
-        pip install --no-cache-dir \
-          "torch==$torch_version" \
-          click==8.5.0 \
-          expecttest==0.3.0 \
-          gin-config==0.5.0 \
-          hypothesis==6.168.0 \
-          iopath==0.1.10 \
-          numpy==${{ matrix.numpy }} \
-          pandas==${{ matrix.pandas }} \
-          parameterized==0.9.0 \
-          pyarrow==25.0.1 \
-          pybind11==3.1.0 \
-          pyre-extensions==0.0.32 \
-          pytest==9.1.1 \
-          setuptools==78.1.0 \
-          tabulate==0.10.0 \
-          tensorboard==2.21.0 \
-          tensordict==0.14.2 \
-          torchmetrics==1.0.3 \
-          tqdm==4.70.1 \
-          wheel==0.48.0 \
-          --extra-index-url https://download.pytorch.org/whl/xpu
-        # --no-deps: TorchRec requires fbgemm-gpu, the CUDA build; the CPU
-        # build fbgemm-gpu-cpu is installed with fbgemm-xpu instead.
-        pip install --no-cache-dir --no-deps --no-build-isolation ./torchrec
-        if pip show fbgemm-gpu >/dev/null 2>&1; then
-          echo "The CUDA build of FBGEMM (fbgemm-gpu) must not be installed"
-          exit 1
-        fi
-        python -c "import torch; assert torch.__version__ == '$torch_version', torch.__version__"
+        "$SCRIPTS/install-dependencies.sh" torchrec
     - name: 'Apply aagalleg/FBGEMM#1 over fbgemm-gpu-cpu 1.9.0'
       run: |
-        git init -q fbgemm-pr
-        git -C fbgemm-pr remote add origin "https://github.com/$FBGEMM_PR_REPO.git"
-        # Blob-less fetch: git diff downloads only the blobs it compares.
-        git -C fbgemm-pr fetch -q --depth=1 --filter=blob:none origin "$FBGEMM_PR_BASE" "$FBGEMM_PR_HEAD"
-        git -C fbgemm-pr diff "$FBGEMM_PR_BASE" "$FBGEMM_PR_HEAD" -- fbgemm_gpu/fbgemm_gpu \
-          > "$E2E/logs/fbgemm-pr.diff"
-        unexpected=$(grep '^+++ ' "$E2E/logs/fbgemm-pr.diff" | grep -vE '^\+\+\+ b/fbgemm_gpu/fbgemm_gpu/.*\.py$' || true)
-        if [ -n "$unexpected" ] || [ ! -s "$E2E/logs/fbgemm-pr.diff" ]; then
-          echo "Expected a non-empty diff of Python files of the fbgemm_gpu package only:"
-          echo "$unexpected"
-          exit 1
-        fi
-        site=$(python -c "import fbgemm_gpu, os; print(os.path.dirname(os.path.dirname(fbgemm_gpu.__file__)))")
-        patch -d "$site" -p2 --forward --batch < "$E2E/logs/fbgemm-pr.diff"
-        python - <<'EOF'
-        import torch
-        from fbgemm_gpu.split_table_batched_embeddings_ops_training import get_available_compute_device
-        from fbgemm_gpu.tbe.config import ComputeDevice
-
-        assert torch.xpu.is_available(), "XPU (Intel GPU) is not available"
-        assert ComputeDevice.XPU == 3, list(ComputeDevice)
-        assert ComputeDevice.get_available() == ComputeDevice.XPU, ComputeDevice.get_available()
-        assert get_available_compute_device() == ComputeDevice.XPU, get_available_compute_device()
-        print("ComputeDevice:", list(ComputeDevice))
-        EOF
-        pip freeze > "$E2E/logs/pip-freeze.txt"
+        "$SCRIPTS/apply-fbgemm-pr.sh"
     - name: 'Test stack on XPU (FBGEMM, TorchRec, fbgemm-xpu)'
+      env:
+        # XCCL loads oneCCL from the virtual environment.
+        CCL_ROOT: ${{ env.VENV }}
+        LD_LIBRARY_PATH: ${{ env.VENV }}/lib:${{ env.LD_LIBRARY_PATH }}
       run: |
-        export CCL_ROOT="$VENV" LD_LIBRARY_PATH="$VENV/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-        python - <<'EOF'
-        # Training (torchrec#3 + FBGEMM#1): one step of a fused
-        # EmbeddingCollection on xpu:0 vs plain torch.
-        import os
-        import sys
-
-        import torch
-        import torch.distributed as dist
-
-        DEV = os.environ.get("E2E_DEVICE", "xpu")
-        if DEV == "xpu":
-            import fbgemm_xpu  # noqa: F401
-        device = torch.device(f"{DEV}:0")
-
-        from fbgemm_gpu.split_embedding_configs import EmbOptimType
-        from fbgemm_gpu.tbe.config import ComputeDevice
-        from torchrec import EmbeddingCollection, EmbeddingConfig, KeyedJaggedTensor
-        from torchrec.distributed.embedding import EmbeddingCollectionSharder
-        from torchrec.distributed.model_parallel import DistributedModelParallel
-        from torchrec.distributed.planner import EmbeddingShardingPlanner, Topology
-        from torchrec.distributed.planner.types import ParameterConstraints
-        from torchrec.distributed.utils import get_device_type
-        from torchrec.test_utils import get_free_port
-
-        NUM_ROWS, DIM, BATCH, LR, EPS = 64, 16, 8, 0.1, 1e-8
-        torch.manual_seed(0)
-        tables = [
-            EmbeddingConfig(num_embeddings=NUM_ROWS, embedding_dim=DIM, name=f"t{i}", feature_names=[f"f{i}"])
-            for i in range(2)
-        ]
-
-
-        def make_kjt():
-            g = torch.Generator().manual_seed(1)
-            lengths = torch.randint(0, 4, (2 * BATCH,), generator=g)
-            values = torch.randint(0, NUM_ROWS, (int(lengths.sum()),), generator=g)
-            return KeyedJaggedTensor.from_lengths_sync(keys=["f0", "f1"], values=values, lengths=lengths)
-
-
-        def check(name, ok, detail=""):
-            print(f"{'PASS' if ok else 'FAIL'} {name} {detail}", flush=True)
-            if not ok:
-                sys.exit(1)
-
-
-        def local(tensor):
-            return (tensor.local_tensor() if hasattr(tensor, "local_tensor") else tensor).cpu()
-
-
-        if DEV == "xpu":
-            check("torchrec.get_device_type", get_device_type() == "xpu", get_device_type())
-            torch.xpu.set_device(device)
-        check("fbgemm.ComputeDevice.XPU", hasattr(ComputeDevice, "XPU"), str(list(ComputeDevice)))
-
-        os.environ.update(MASTER_ADDR="127.0.0.1", MASTER_PORT=str(get_free_port()))
-        backend = "xccl" if DEV == "xpu" and dist.is_xccl_available() else "gloo"
-        dist.init_process_group(backend=backend, rank=0, world_size=1)
-        print(f"process group: {backend}", flush=True)
-
-        ec = EmbeddingCollection(tables=tables, device=torch.device("meta"))
-        sharder = EmbeddingCollectionSharder(
-            fused_params={"optimizer": EmbOptimType.EXACT_ROWWISE_ADAGRAD, "learning_rate": LR, "eps": EPS}
-        )
-        topology = Topology(world_size=1, compute_device=DEV)
-        constraints = {
-            t.name: ParameterConstraints(sharding_types=["table_wise"], compute_kernels=["fused"]) for t in tables
-        }
-        plan = EmbeddingShardingPlanner(topology=topology, constraints=constraints).plan(ec, [sharder])
-        model = DistributedModelParallel(ec, device=device, plan=plan, sharders=[sharder], init_data_parallel=False)
-        weights = {name: torch.rand(NUM_ROWS, DIM) for name in ("t0", "t1")}
-        for name, tensor in model.state_dict().items():
-            weights_table = weights[name.split(".")[-2]]
-            (tensor.local_tensor() if hasattr(tensor, "local_tensor") else tensor).copy_(weights_table)
-        if DEV == "xpu":
-            # Sharded modules keep their lookups in a plain list, which
-            # modules() does not traverse.
-            tbes = [
-                sub
-                for m in model.modules()
-                for lookup in getattr(m, "_lookups", [])
-                for sub in lookup.modules()
-                if hasattr(sub, "use_cpu")
-            ]
-            placement = [
-                (m.use_cpu, m.weights_dev.device.type, m.weights_host.numel(), m.weights_uvm.numel())
-                for m in tbes
-            ]
-            check(
-                "training.tbe_on_xpu",
-                bool(placement) and all(p == (False, "xpu", 0, 0) for p in placement),
-                f"(use_cpu, weights_dev device, weights_host numel, weights_uvm numel) per TBE: {placement}",
-            )
-
-        kjt = make_kjt()
-        out = model(kjt.to(device))
-        sum((out[k].values() * (i + 1)).sum() for i, k in enumerate(("f0", "f1"))).backward()
-        state = {name.split(".")[-2]: local(tensor) for name, tensor in model.state_dict().items()}
-        for i, (key, table) in enumerate((("f0", "t0"), ("f1", "t1"))):
-            ids, w = kjt[key].values(), weights[table]
-            torch.testing.assert_close(out[key].values().detach().cpu(), w[ids], atol=1e-5, rtol=1e-5)
-            grad = torch.zeros(NUM_ROWS, DIM).index_add_(0, ids, torch.full((ids.numel(), DIM), float(i + 1)))
-            momentum = grad.square().mean(dim=1)
-            expected = w - (LR / (momentum.sqrt() + EPS))[:, None] * grad
-            torch.testing.assert_close(state[table], expected, atol=1e-5, rtol=1e-5)
-            check(f"training.{table}", True, "lookup and row-wise Adagrad update == reference")
-
-        dist.destroy_process_group()
-        EOF
+        python "$SCRIPTS/test_stack.py"
     - name: 'Test TorchRec XPU changes (device-agnostic unit tests)'
       working-directory: torchrec
       run: |
@@ -845,86 +694,16 @@ jobs:
           torchrec/distributed/tests/test_utils.py
     - name: 'Prepare MovieLens-1M'
       run: |
-        mkdir -p "$E2E/prep/tmp" "$E2E/data/data"
-        curl -fsSL --retry 3 -o "$E2E/prep/tmp/movielens1m.zip" "$ML1M_URL"
-        echo "$ML1M_SHA256  $E2E/prep/tmp/movielens1m.zip" | sha256sum -c -
-        # GR's preprocessor finds the archive in tmp/ and does not download it
-        # again. It shuffles with NumPy's global RNG, so seed it.
-        cd "$E2E/prep"
-        PYTHONPATH="$GITHUB_WORKSPACE/gr-train" python -c "
-        import numpy as np
-        import pandas as pd
-        np.random.seed(0)
-        sort_values = pd.DataFrame.sort_values
-        pd.DataFrame.sort_values = lambda self, *args, **kwargs: sort_values(self, *args, **{**kwargs, 'kind': 'stable'})
-        from generative_recommenders.research.data.preprocessor import get_common_preprocessors
-        get_common_preprocessors()['ml-1m'].preprocess_rating()
-        "
-        mv tmp/ml-1m "$E2E/data/data/ml-1m"
-        echo "$ML1M_PREPARED_SHA256  $E2E/data/data/ml-1m/sasrec_format.csv" | sha256sum -c -
+        "$SCRIPTS/prepare-movielens-1m.sh" gr-train
     - name: 'Run DLRM-v3 training on XPU (train-eval smoke)'
-      working-directory: gr-train
-      # The container's sh (dash) has no pipefail.
-      shell: bash
+      env:
+        CCL_ROOT: ${{ env.VENV }}
+        LD_LIBRARY_PATH: ${{ env.VENV }}/lib:${{ env.LD_LIBRARY_PATH }}
       run: |
-        # Shortened copy of movielens_1m_xpu.gin: the overrides come last, and
-        # gin keeps the last binding of a parameter.
-        gin=generative_recommenders/dlrm_v3/train/gin/movielens_1m_xpu.gin
-        cat >> "$gin" <<EOF
-
-        # torchlib-xpu CI (test-dlrm-v3): bounded train-eval smoke.
-        make_train_test_dataloaders.new_path_prefix = "$E2E/data"
-        train_eval_loop.num_epochs = 1
-        train_eval_loop.num_train_batches = 40
-        train_eval_loop.eval_frequency = 20
-        train_eval_loop.num_eval_batches = 5
-        MetricsLogger.tensorboard_log_path = "$E2E/logs/tensorboard"
-        EOF
-        cp "$gin" "$E2E/logs/"
-        export PYTHONPATH="$PWD" WORLD_SIZE=1
-        export CCL_ROOT="$VENV" LD_LIBRARY_PATH="$VENV/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-        set -o pipefail
-        timeout --kill-after=30s 3600s python -m generative_recommenders.dlrm_v3.train.train_ranker \
-          --dataset movielens-1m-xpu --mode train-eval 2>&1 | tee "$E2E/logs/train.log"
+        "$SCRIPTS/run-training.sh" gr-train
     - name: 'Check DLRM-v3 training log'
       run: |
-        python - "$E2E/logs/train.log" <<'EOF'
-        import math, re, sys
-
-        text = open(sys.argv[1]).read()
-        step = re.compile(r"(train|eval) - Step (\d+) metrics: (\{.*\})")
-        metric = re.compile(r"'([^']+)':\s*(?:tensor\()?\s*([-+0-9.eE]+|nan|inf)")
-        rank_hbm = re.compile(r"^\W*(\d+)\W+([\d.]+) \((\d+)%\)")
-        steps = {"train": [], "eval": []}
-        last_eval, not_finite = {}, []
-        for mode, n, metrics in step.findall(text):
-            steps[mode].append(int(n))
-            values = {k: float(v) for k, v in metric.findall(metrics)}
-            not_finite += [f"{mode} {n} {k}" for k, v in values.items() if not math.isfinite(v)]
-            if mode == "eval":
-                last_eval = values
-        hbm = {}
-        for line in text.splitlines():
-            if "planner.stats:" not in line:
-                continue
-            line = line.split("planner.stats:", 1)[1]
-            match = rank_hbm.match(line)
-            if match and "HBM" not in line:
-                hbm.setdefault(int(match[1]), float(match[2]))
-        failures = []
-        if "Traceback (most recent call last)" in text:
-            failures.append("traceback in the log")
-        if not steps["train"] or not steps["eval"]:
-            failures.append(f"train steps {steps['train']}, eval steps {steps['eval']}")
-        if not hbm or not all(v > 0 for v in hbm.values()):
-            failures.append(f"planner HBM per rank {hbm}")
-        if not_finite:
-            failures.append(f"non-finite metrics: {not_finite[:5]}")
-        print(f"train steps {steps['train']}, eval steps {steps['eval']}, planner HBM GB {hbm}")
-        print(f"last eval metrics {last_eval}")
-        if failures:
-            sys.exit("FAIL: " + "; ".join(failures))
-        EOF
+        python "$SCRIPTS/check_training_log.py" "$E2E/logs/train.log"
     - name: 'Upload DLRM-v3 logs'
       if: always()
       uses: actions/upload-artifact@v7

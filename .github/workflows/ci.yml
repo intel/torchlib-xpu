@@ -544,8 +544,12 @@ jobs:
   # external source is pinned to a commit in `env` below. How to run the same
   # steps locally: packages/fbgemm-xpu/README.md, "End-to-end DLRM-v3 tests".
   test-dlrm-v3:
-    needs: [ build, identify-changes ]
-    if: needs.identify-changes.outputs.dlrm-v3 == 'true'
+    needs: [ build, identify-changes, test-fbgemm ]
+    if: >-
+      !cancelled()
+      && needs.build.result == 'success'
+      && needs.identify-changes.outputs.dlrm-v3 == 'true'
+      && contains(fromJSON('["success", "skipped"]'), needs.test-fbgemm.result)
     strategy:
       max-parallel: 1
       matrix:

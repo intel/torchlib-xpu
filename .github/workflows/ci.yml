@@ -406,7 +406,10 @@ jobs:
 
   test-fbgemm:
     needs: [ build, identify-changes ]
-    if: needs.identify-changes.outputs.fbgemm-xpu == 'true'
+    # Also runs whenever test-dlrm-v3 runs, which needs it to pass.
+    if: >-
+      needs.identify-changes.outputs.fbgemm-xpu == 'true'
+      || needs.identify-changes.outputs.dlrm-v3 == 'true'
     strategy:
       max-parallel: 1
       matrix:
@@ -545,11 +548,7 @@ jobs:
   # steps locally: packages/fbgemm-xpu/README.md, "End-to-end DLRM-v3 tests".
   test-dlrm-v3:
     needs: [ build, identify-changes, test-fbgemm ]
-    if: >-
-      !cancelled()
-      && needs.build.result == 'success'
-      && needs.identify-changes.outputs.dlrm-v3 == 'true'
-      && contains(fromJSON('["success", "skipped"]'), needs.test-fbgemm.result)
+    if: needs.identify-changes.outputs.dlrm-v3 == 'true'
     strategy:
       max-parallel: 1
       matrix:

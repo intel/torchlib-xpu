@@ -25,6 +25,11 @@ class XpuDeviceInterface : public DeviceInterface {
       const UniqueDecodingAVFormatContext& av_format_ctx,
       const VideoStreamOptions& video_stream_options) override;
 
+  void initialize_color_conversion(
+      const VideoStreamOptions& video_stream_options,
+      const std::vector<std::unique_ptr<Transform>>& transforms,
+      const std::optional<FrameDims>& resized_output_dims) override;
+
   std::string get_details() override;
 
   void register_hardware_device_with_codec(AVCodecContext* codec_context) override;
@@ -34,6 +39,10 @@ class XpuDeviceInterface : public DeviceInterface {
       FrameOutput& frame_output,
       std::optional<torch::stable::Tensor> pre_allocated_output_tensor =
           std::nullopt) override;
+
+  void make_frame_standalone(UniqueAVFrame& av_frame) override;
+  std::optional<torch::stable::Tensor> get_frame_storage(
+      const AVFrame& av_frame) const override;
 
   // ---- Encoding overrides ----
   UniqueAVFrame convert_tensor_to_av_frame_for_encoding(
@@ -53,7 +62,7 @@ class XpuDeviceInterface : public DeviceInterface {
   std::unique_ptr<DeviceInterface> cpu_interface_;
 
   VideoStreamOptions video_stream_options_;
-  AVRational time_base_;
+  AVRational time_base_{1, AV_TIME_BASE};
   bool has_fp64_;
   bool has_decoded_frame_ = false;
   bool using_cpu_fallback_ = false;

@@ -190,21 +190,23 @@ dense backward, and about 30 GiB of host memory for the CPU check. On a
 device with less memory, pass only the configs that fit, and say so in the
 notes you commit.
 
-The weights and momentum are copied to the device in 128 MiB slices. With
-compute-runtime 26.31 on BMG, a host-to-device copy of 512 MiB or more from
-pageable memory is mapped for the copy engine as an external host pointer,
-and the copy can then fault the engine. On the B60 nodes used for the
-baseline (host kernel 7.0.0-38), a single copy of the 8.2 GB `large` table
-failed intermittently, with `UR_RESULT_ERROR_DEVICE_LOST`, or with
-`UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY` that left the memory held, also with a
-plain `tensor.to("xpu")` and no benchmark code. See
+The weights and momentum are copied to the device in 128 MiB slices. On the
+B60 nodes used for the baseline (compute-runtime 26.31, host kernel
+7.0.0-38), a single pageable copy of the 8.2 GB `large` table failed
+intermittently, with `UR_RESULT_ERROR_DEVICE_LOST`, or with
+`UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY` after which later allocations of the
+table failed in the same process, also with a plain `tensor.to("xpu")` and
+no benchmark code. Copies in 128 MiB and 1 GiB slices never failed.
 [intel/torch-xpu-ops#5867](https://github.com/intel/torch-xpu-ops/issues/5867)
-and [intel/compute-runtime#948](https://github.com/intel/compute-runtime/issues/948).
+reports the same failure with the same driver, and a comment in
+[intel/compute-runtime#948](https://github.com/intel/compute-runtime/issues/948)
+traces it to copies of 512 MiB or more being mapped for the copy engine as
+an external host pointer.
 
 The BMG baseline was recorded on one B60 in a Kubernetes pod limited to 4
-CPUs and 32 GiB of memory, with `OMP_NUM_THREADS=4`. Three earlier runs of
-the same timing code on the same pod, without `skewed`, agreed with it
-within the noise given under Reading the numbers below.
+CPUs and 32 GiB of memory, with `OMP_NUM_THREADS=4`. Three more runs of
+each config with the same timing code on the same pod agreed with it within
+the noise given under Reading the numbers below.
 
 ### What the benchmark measures
 
@@ -242,10 +244,10 @@ within the noise given under Reading the numbers below.
 - **Optimiser and initialisation:** the optimiser is upstream
   `tbe_training_benchmark.py`'s default: rowwise Adagrad with a learning rate
   of 0.1 and eps of 0.1, and no stochastic rounding. Weights are drawn
-  uniformly from [-0.0003, 0.0003], the range upstream uses for INT8
-  weights. For FP32 and FP16, upstream keeps each module's own
-  initialisation: zeros for the split module and standard normal for the
-  dense one. The output gradient is standard normal.
+  uniformly from [-0.0003, 0.0003] for every precision, the range upstream
+  uses for INT8 weights. Upstream, by contrast, keeps each FP32 and FP16
+  module's own initialisation: zeros for the split module and standard
+  normal for the dense one. The output gradient is standard normal.
 - **Correctness first:** for each config, precision and lookup, one forward
   and one backward on XPU are compared against CPU with
   `torch.testing.assert_close` before anything is timed. Both start from the
@@ -309,7 +311,7 @@ still use L.
   [`backward_utils.cpp`](../../src/fbgemm_xpu/fbgemm_utils/backward_utils.cpp)),
   and the GPU idles for that round trip. The timing helper therefore logs, for
   each backward, that the GPU may have waited for the host. The backward
-  times include that wait, which is part of the operator's cost. 
+  times include that wait, which is part of the operator's cost.
 - The dense backward also zero-fills and writes its gradient of the whole
   table, T × E × D values, whatever the batch. It is therefore slower than
   the split backward: in FP32, 7.9 ms against 3.8 ms at `medium` and 29.1 ms
@@ -320,10 +322,11 @@ still use L.
   456 GB/s its memory is rated at. The formula counts every lookup as a
   row read from memory, but the most read rows, thousands of lookups each,
   stay in the cache.
-- Over four runs on one B60, forward times varied by at most 0.5%, and the
-  `large` backwards by at most 0.8%. The `small` and `medium` backwards, where
-  the host round trip weighs most and the pod had only 4 CPUs, varied by up
-  to 15%. Treat changes smaller than that as noise.
+- Over four runs of each config on one B60, forward times varied by at most
+  0.5%, the `large` backwards by at most 0.8% and the `skewed` backwards by
+  at most 4.7%. The `small` and `medium` backwards, where the host round trip
+  weighs most and the pod had only 4 CPUs, varied by up to 15%. Treat changes
+  smaller than that as noise.
 
 ### Not benchmarked on XPU
 

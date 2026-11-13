@@ -3,6 +3,7 @@
 
 """Tests for the TBE training benchmark of the XPU lookup operators."""
 
+import csv
 import dataclasses
 import json
 from pathlib import Path
@@ -48,13 +49,19 @@ def test_upstream_bytes_match_upstream_nobag_formula():
     config = tbe_training.load_config(
         next(p for p in _CONFIGS if p.stem == "medium")
     )
-    lookups = 2048 * 8 * 20 * 128
+    # With a fixed L, counting the indices is upstream's B x T x L.
+    num_indices = 2048 * 8 * 20
+    lookups = num_indices * 128
     assert tbe_training.upstream_bytes(  # nosec B101
-        config, SparseType.FP32, SparseType.FP32
+        config, num_indices, SparseType.FP32, SparseType.FP32
     ) == (lookups * 8, lookups * 16)
     assert tbe_training.upstream_bytes(  # nosec B101
-        config, SparseType.FP16, SparseType.FP32
+        config, num_indices, SparseType.FP16, SparseType.FP32
     ) == (lookups * 6, lookups * 12)
+    # With variable bag lengths, the indices actually drawn are counted.
+    assert tbe_training.upstream_bytes(  # nosec B101
+        config, 1000, SparseType.FP32, SparseType.FP32
+    ) == (1000 * 128 * 8, 1000 * 128 * 16)
 
 
 @pytest.mark.parametrize(
@@ -71,14 +78,22 @@ def test_unsupported_configs_are_rejected(small_config_path, change, reason):
         tbe_training._validate(config, "test")
 
 
-def test_variable_pooling_length_is_rejected(small_config_path):
-    config = tbe_training.load_config(small_config_path)
-    config = dataclasses.replace(
+# The two shapes the XPU lookups were checked on: lengths drawn around L, and
+# DLRM-v3's mix of a jagged history and single-ID features.
+_VARIABLE_LENGTHS = {"sigma_L": {"sigma_L": 10}, "Ls": {"Ls": [50, 1, 1, 20]}}
+
+
+def _with_pooling(config, **pooling):
+    return dataclasses.replace(
         config,
-        pooling_params=dataclasses.replace(config.pooling_params, sigma_L=4),
+        pooling_params=dataclasses.replace(config.pooling_params, **pooling),
     )
-    with pytest.raises(ValueError, match="variable pooling lengths"):
-        tbe_training._validate(config, "test")
+
+
+@pytest.mark.parametrize("pooling", _VARIABLE_LENGTHS.values(), ids=_VARIABLE_LENGTHS)
+def test_variable_bag_lengths_are_accepted(small_config_path, pooling):
+    config = _with_pooling(tbe_training.load_config(small_config_path), **pooling)
+    assert tbe_training._validate(config, "test") is config  # nosec B101
 
 
 def test_smoke_config_shrinks_only_sizes(small_config_path):
@@ -163,6 +178,30 @@ def test_timing_process_times_the_checked_batch(small_config_path):
     )
     assert timing.fwd_s > 0 and timing.bwd_s > 0  # nosec B101
     assert timing.peak_device_bytes > 0  # nosec B101
+
+
+@requires_xpu
+def test_smoke_run_checks_variable_bag_lengths(small_config_path, tmp_path):
+    small = tbe_training.load_config(small_config_path)
+    paths = []
+    for name, pooling in _VARIABLE_LENGTHS.items():
+        path = tmp_path / f"{name}.json"
+        path.write_text(_with_pooling(small, **pooling).json(format=True))
+        paths.append(str(path))
+    # Every case passes its CPU check before a row is written.
+    result, output = _run(["--smoke", "--dtypes", "float32", *paths], tmp_path)
+    assert result.exit_code == 0, result.output  # nosec B101
+
+    with open(output) as f:
+        rows = {(r["config"], r["family"], r["direction"]): r for r in csv.DictReader(f)}
+    assert len(rows) == 8  # nosec B101
+    # Smoke caps the lengths at 4: Ls [4, 1, 1, 4] for 8 bags per table.
+    ls_row = rows["Ls", "dense", "fwd"]
+    assert (ls_row["total_lengths"], ls_row["bag_size"]) == ("80", "2.5")  # nosec B101
+    assert int(ls_row["bytes"]) == 80 * 128 * 8  # nosec B101
+    notes = output.with_suffix(".md").read_text()
+    assert "bag sizes per table [4, 1, 1, 4]" in notes  # nosec B101
+    assert "bag_size normal mean 4 sigma 10" in notes  # nosec B101
 
 
 @requires_xpu

@@ -86,24 +86,32 @@ def _dtype_name(sparse_type: SparseType) -> str:
 
 
 def _validate(config: TBEDataConfig, source: str) -> TBEDataConfig:
-    """Reject the workloads the XPU lookup kernels cannot run."""
-    unsupported = {
-        "weighted": config.weighted,
-        "mixed_dim": config.mixed_dim,
-        "per-table Es or Ds": config.Es is not None or config.Ds is not None,
-        "embedding_specs or feature_table_map": config.embedding_specs is not None
-        or config.feature_table_map is not None,
-        "variable batch sizes (VBE)": config.variable_B()
-        or config.batch_params.Bs is not None,
-        "variable pooling lengths": config.variable_L()
-        or config.pooling_params.Ls is not None,
+    """Reject the workloads the XPU lookups or this harness cannot run.
+
+    Variable bag lengths, ``sigma_L`` or per-table ``Ls``, are accepted: the
+    kernels read the length of each bag from the offsets.
+    """
+    limits = {
+        "the XPU lookups": {
+            "weighted": config.weighted,
+            "mixed_dim or per-table Ds": config.mixed_dim or config.Ds is not None,
+            "variable batch sizes (VBE)": config.variable_B()
+            or config.batch_params.Bs is not None,
+        },
+        "this harness": {
+            "per-table Es": config.Es is not None,
+            "embedding_specs or feature_table_map": config.embedding_specs
+            is not None
+            or config.feature_table_map is not None,
+        },
     }
-    found = [name for name, present in unsupported.items() if present]
+    found = [
+        f"{', '.join(names)} (unsupported by {owner})"
+        for owner, checks in limits.items()
+        if (names := [name for name, present in checks.items() if present])
+    ]
     if found:
-        raise ValueError(
-            f"{source}: the XPU lookups support only uniform, unweighted, "
-            f"fixed-batch, fixed-length workloads; unsupported: {', '.join(found)}"
-        )
+        raise ValueError(f"{source}: {'; '.join(found)}")
     if not config.use_cpu:
         # generate_requests places tensors on CUDA or MTIA unless use_cpu is
         # set; the harness moves them to XPU itself.
@@ -124,18 +132,28 @@ def smoke_config(config: TBEDataConfig) -> TBEDataConfig:
             config.batch_params, B=min(config.batch_params.B, 8)
         ),
         pooling_params=dataclasses.replace(
-            config.pooling_params, L=min(config.pooling_params.L, 4)
+            config.pooling_params,
+            L=min(config.pooling_params.L, 4),
+            Ls=None
+            if config.pooling_params.Ls is None
+            else [min(L, 4) for L in config.pooling_params.Ls],
         ),
     )
 
 
 def describe_config(config: TBEDataConfig) -> str:
     """The parameters of ``config`` that the XPU lookups depend on."""
-    ip = config.indices_params
+    ip, pp = config.indices_params, config.pooling_params
+    if pp.Ls is not None:
+        bags = f"bag sizes per table {[int(L) for L in pp.Ls]}"
+    elif config.variable_L():
+        bags = f"bag_size {pp.length_distribution} mean {pp.L} sigma {pp.sigma_L}"
+    else:
+        bags = f"bag_size={pp.L}"
     return (
         f"batch_size={config.batch_params.B}, num_tables={config.T}, "
         f"num_embeddings={config.E}, embedding_dim={config.D}, "
-        f"bag_size={config.pooling_params.L}, Zipf q={ip.zipf_q} s={ip.zipf_s}, "
+        f"{bags}, Zipf q={ip.zipf_q} s={ip.zipf_s}, "
         f"{ip.heavy_hitters.numel()} heavy hitters, "
         f"indices {str(ip.index_dtype).removeprefix('torch.')}, "
         f"offsets {str(ip.offset_dtype).removeprefix('torch.')}"
@@ -143,10 +161,17 @@ def describe_config(config: TBEDataConfig) -> str:
 
 
 def upstream_bytes(
-    config: TBEDataConfig, weights_dtype: SparseType, output_dtype: SparseType
+    config: TBEDataConfig,
+    num_indices: int,
+    weights_dtype: SparseType,
+    output_dtype: SparseType,
 ) -> tuple[int, int]:
-    """Forward and backward bytes, as upstream's no-bag formula counts them."""
-    lookups = config.batch_params.B * config.T * config.D * config.pooling_params.L
+    """Forward and backward bytes, as upstream's no-bag formula counts them.
+
+    Upstream multiplies B, T and L; counting the indices gives the same bytes
+    for a fixed L, and the bytes actually moved for variable bag lengths.
+    """
+    lookups = num_indices * config.D
     fwd = int(
         lookups * (weights_dtype.bit_rate() / 8.0 + output_dtype.bit_rate() / 8.0)
     )
@@ -718,7 +743,9 @@ def tbe_training(
         for config_name, config in loaded.items():
             indices, offsets, grad_out = _request(config, seed)
             digest = _request_digest(indices, offsets)
-            fwd_bytes, bwd_bytes = upstream_bytes(config, weights_dtype, OUTPUT_DTYPE)
+            fwd_bytes, bwd_bytes = upstream_bytes(
+                config, indices.numel(), weights_dtype, OUTPUT_DTYPE
+            )
             for family_name, lookup in run_lookups.items():
                 name = f"{config_name} {family_name} {dtype_name}"
                 initial = _initial_state(config, lookup, weights_dtype, seed)
@@ -750,7 +777,8 @@ def tbe_training(
                         "num_tables": config.T,
                         "num_embeddings": config.E,
                         "embedding_dim": config.D,
-                        "bag_size": config.pooling_params.L,
+                        # The mean bag length: L when it is fixed.
+                        "bag_size": f"{indices.numel() / (offsets.numel() - 1):.4g}",
                         "total_lengths": indices.numel(),
                         "time_us": f"{seconds * 1e6:.2f}",
                         "bytes": num_bytes,

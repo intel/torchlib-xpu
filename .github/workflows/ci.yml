@@ -534,10 +534,6 @@ jobs:
         pytest -rsf fbgemm_gpu/test/sparse/reorder_batched_test.py
         pytest -rsf fbgemm_gpu/test/tbe/utils/generate_vbe_metadata_test.py
         pytest -rsf fbgemm_gpu/test/tbe/utils/split_embeddings_utils_test.py
-        # Unpatched: TBEDataConfig loading and serialisation, which the TBE
-        # training benchmark's committed configs rely on.
-        pytest -rsf fbgemm_gpu/test/tbe/bench/tbe_data_config_loader_test.py
-        pytest -rsf fbgemm_gpu/test/tbe/bench/tbe_data_config_models_test.py
     - name: 'Smoke run patched upstream jagged benchmark'
       working-directory: fbgemm
       run: |

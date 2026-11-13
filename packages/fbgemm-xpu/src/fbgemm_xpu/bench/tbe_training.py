@@ -17,7 +17,13 @@ Workloads are ``TBEDataConfig`` JSON files, loaded with
 an incorrect result cannot be recorded as a fast one. The split lookup is
 checked against FBGEMM's own CPU kernel for the operator. The dense lookup is
 checked against plain torch, because FBGEMM's CPU dense kernel sum-pools even
-for no-bag lookups. Run it with::
+for no-bag lookups.
+
+Each case is then timed in a newly spawned process. The forward time of a
+lookup depends on the device allocations made earlier in the same process, so
+timing every case in one process would make each row depend on the cases
+before it, and a run of a subset of the cases would not reproduce the rows of
+the full run. Run it with::
 
     python -m fbgemm_xpu.bench.tbe_training \\
         packages/fbgemm-xpu/bench/tbe/configs/*.json --output tbe_training.csv
@@ -34,8 +40,10 @@ import dataclasses
 import functools
 import hashlib
 import logging
+import multiprocessing
 import os
 from collections.abc import Callable
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import click
@@ -312,6 +320,27 @@ def _backward(
     return ()
 
 
+# Bytes copied to the device at once. With compute-runtime 26.31 on BMG, a
+# host-to-device copy of 512 MiB or more from pageable memory is mapped for the
+# copy engine as an external host pointer, and the copy can then fault the
+# engine: UR_RESULT_ERROR_DEVICE_LOST, intermittently. Copies of 128 MiB are not
+# mapped that way. See intel/torch-xpu-ops#5867 and intel/compute-runtime#948.
+_COPY_BYTES = 128 << 20
+
+
+def _to_device(tensor: torch.Tensor, device: torch.device) -> torch.Tensor:
+    """A copy of ``tensor`` on ``device``, made in slices of ``_COPY_BYTES``.
+
+    One allocation of the full size, so it takes no more memory than
+    ``tensor.to(device, copy=True)``.
+    """
+    out = torch.empty_like(tensor, device=device)
+    step = max(1, _COPY_BYTES // tensor.element_size())
+    for dst, src in zip(out.view(-1).split(step), tensor.view(-1).split(step)):
+        dst.copy_(src)
+    return out
+
+
 # The output, the gradients and the state after one forward and backward.
 LookupResult = tuple[torch.Tensor, list[torch.Tensor], dict[str, torch.Tensor]]
 
@@ -327,7 +356,7 @@ def _run_once(
 ) -> LookupResult:
     layout = Layout.build(config, indices, offsets, device)
     state = {
-        k: v.to(device, copy=True).requires_grad_(not lookup.state)
+        k: _to_device(v, device).requires_grad_(not lookup.state)
         for k, v in initial.items()
     }
     out, inputs = lookup.bind(layout, state, OUTPUT_DTYPE)()
@@ -491,7 +520,7 @@ def _time_lookup(
     xpu = torch.device("xpu")
     layout = Layout.build(config, indices, offsets, xpu)
     state = {
-        k: v.to(xpu, copy=True).requires_grad_(not lookup.state)
+        k: _to_device(v, xpu).requires_grad_(not lookup.state)
         for k, v in initial.items()
     }
     grad_out = grad_out.to(xpu)
@@ -507,6 +536,65 @@ def _time_lookup(
 
     bwd_s, _ = benchmark_torch_function(backward, (), iters=iters)
     return fwd_s, bwd_s
+
+
+def _request_digest(indices: torch.Tensor, offsets: torch.Tensor) -> str:
+    digest = hashlib.sha256()
+    for tensor in (indices, offsets):
+        digest.update(tensor.contiguous().numpy().tobytes())
+    return digest.hexdigest()
+
+
+@dataclasses.dataclass(frozen=True)
+class CaseTiming:
+    """What a timing process returns to the run."""
+
+    fwd_s: float
+    bwd_s: float
+    peak_device_bytes: int
+    request_digest: str
+
+
+def _time_case(
+    config: TBEDataConfig,
+    family_name: str,
+    weights_dtype: SparseType,
+    seed: int,
+    iters: int,
+) -> CaseTiming:
+    """Rebuild one case from its seed and time it, in a process of its own.
+
+    The forward time of a lookup depends on the device allocations made
+    earlier in the same process, so one process timing every case would make
+    each row depend on the cases run before it. A fresh process gives every
+    case the same start, whatever ``--families``, ``--dtypes`` or configs
+    were passed. The request digest lets the run confirm that this process
+    timed the batch it checked.
+    """
+    indices, offsets, grad_out = _request(config, seed)
+    lookup = LOOKUPS[family_name]
+    initial = _initial_state(config, lookup, weights_dtype, seed)
+    fwd_s, bwd_s = _time_lookup(
+        lookup, config, indices, offsets, initial, grad_out, iters
+    )
+    return CaseTiming(
+        fwd_s=fwd_s,
+        bwd_s=bwd_s,
+        peak_device_bytes=torch.xpu.max_memory_allocated(),
+        request_digest=_request_digest(indices, offsets),
+    )
+
+
+def _time_in_fresh_process(*args) -> CaseTiming:
+    """Run ``_time_case`` in a newly spawned process.
+
+    Spawned rather than forked: a forked child would inherit the parent's
+    XPU context, which is not fork-safe.
+    """
+    with ProcessPoolExecutor(
+        max_workers=1, mp_context=multiprocessing.get_context("spawn")
+    ) as pool:
+        return pool.submit(_time_case, *args).result()
 
 
 def _int_list(value: str) -> list[str]:
@@ -601,6 +689,8 @@ def tbe_training(
         backward="the backward of a graph built once; dense differentiates the "
         "weights with torch.autograd.grad; split runs torch.autograd.backward, "
         "which applies the optimiser update in place",
+        processes="each case is checked on CPU in the run's process, then "
+        "rebuilt from the seed and timed in a newly spawned process of its own",
         dtypes=",".join(run_dtypes),
         output_dtype=_dtype_name(OUTPUT_DTYPE),
         families=", ".join(f"{f} = {lk.operator}" for f, lk in run_lookups.items()),
@@ -623,9 +713,11 @@ def tbe_training(
         "gb_per_s",
     ]
     rows = []
+    peak_device_bytes = 0
     for dtype_name, weights_dtype in run_dtypes.items():
         for config_name, config in loaded.items():
             indices, offsets, grad_out = _request(config, seed)
+            digest = _request_digest(indices, offsets)
             fwd_bytes, bwd_bytes = upstream_bytes(config, weights_dtype, OUTPUT_DTYPE)
             for family_name, lookup in run_lookups.items():
                 name = f"{config_name} {family_name} {dtype_name}"
@@ -633,15 +725,21 @@ def tbe_training(
                 check_against_cpu(
                     name, family_name, config, indices, offsets, initial, grad_out
                 )
-                torch.xpu.empty_cache()
-                fwd_s, bwd_s = _time_lookup(
-                    lookup, config, indices, offsets, initial, grad_out, iters
-                )
+                # Freed before the timing process builds its own copy.
                 del initial
                 torch.xpu.empty_cache()
+                timing = _time_in_fresh_process(
+                    config, family_name, weights_dtype, seed, iters
+                )
+                if timing.request_digest != digest:
+                    raise RuntimeError(
+                        f"{name}: the timing process generated a different batch "
+                        "from the one checked on CPU"
+                    )
+                peak_device_bytes = max(peak_device_bytes, timing.peak_device_bytes)
                 for direction, seconds, num_bytes in (
-                    ("fwd", fwd_s, fwd_bytes),
-                    ("bwd", bwd_s, bwd_bytes),
+                    ("fwd", timing.fwd_s, fwd_bytes),
+                    ("bwd", timing.bwd_s, bwd_bytes),
                 ):
                     row = {
                         "config": config_name,
@@ -662,10 +760,10 @@ def tbe_training(
                     rows.append(row)
             del indices, offsets, grad_out
 
-    # Written only after every case passed its CPU check.
-    metadata["peak_device_memory_gib"] = (
-        f"{torch.xpu.max_memory_allocated() / 2**30:.1f}"
-    )
+    # Written only after every case passed its CPU check. The largest peak of
+    # any one process: the run's own, for the checks, or a timing process's.
+    peak_device_bytes = max(peak_device_bytes, torch.xpu.max_memory_allocated())
+    metadata["peak_device_memory_gib"] = f"{peak_device_bytes / 2**30:.1f}"
     with open(output, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()

@@ -104,6 +104,15 @@ def test_chunked_check_finds_mismatch_past_first_chunk(monkeypatch):
         tbe_training._assert_close_chunked(expected.reshape(4, 3), expected, "shape")
 
 
+def test_device_copy_in_slices_matches_whole_copy(monkeypatch):
+    # 10 bytes: slices of 5 FP16 elements, the last one shorter.
+    monkeypatch.setattr(tbe_training, "_COPY_BYTES", 10)
+    source = torch.arange(12, dtype=torch.float16)
+    copy = tbe_training._to_device(source, torch.device("cpu"))
+    assert copy.data_ptr() != source.data_ptr()  # nosec B101
+    torch.testing.assert_close(copy, source)
+
+
 def _run(args, tmp_path):
     output = tmp_path / "tbe.csv"
     result = CliRunner().invoke(
@@ -140,6 +149,20 @@ def test_smoke_run_writes_rows_and_notes(small_config_path, tmp_path):
         "small: batch_size=8, num_tables=4, num_embeddings=1000, "
         "embedding_dim=128, bag_size=4," in notes
     )
+
+
+@requires_xpu
+def test_timing_process_times_the_checked_batch(small_config_path):
+    # The run checks a batch in its own process and times one regenerated
+    # from the seed in another, so the two must be the same batch.
+    config = tbe_training.smoke_config(tbe_training.load_config(small_config_path))
+    indices, offsets, _ = tbe_training._request(config, 0)
+    timing = tbe_training._time_in_fresh_process(config, "dense", SparseType.FP32, 0, 2)
+    assert timing.request_digest == tbe_training._request_digest(  # nosec B101
+        indices, offsets
+    )
+    assert timing.fwd_s > 0 and timing.bwd_s > 0  # nosec B101
+    assert timing.peak_device_bytes > 0  # nosec B101
 
 
 @requires_xpu

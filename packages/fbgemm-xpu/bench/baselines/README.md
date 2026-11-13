@@ -171,7 +171,7 @@ From the root of the repository:
 uv pip install -e "packages/fbgemm-xpu[test]" \
   --index https://download.pytorch.org/whl/xpu
 ZE_AFFINITY_MASK=0 python -m fbgemm_xpu.bench.tbe_training \
-  packages/fbgemm-xpu/bench/tbe/configs/{small,medium,large}.json \
+  packages/fbgemm-xpu/bench/tbe/configs/{small,medium,large,skewed}.json \
   --output tbe_training.csv
 ```
 
@@ -183,37 +183,61 @@ in the same format. The notes also record the workloads, a SHA-256 prefix of
 each config file and the peak device memory. Select lookups with `--families`
 (`dense`, `split`) and weight dtypes with `--dtypes` (`float32`, `float16`).
 
-A run takes about 4 minutes on a B60 with 4 CPUs, most of it in the CPU
-checks. The `large` config needs 18.7 GiB of device memory, for the FP32
+A run takes about 7 minutes on a B60 with 4 CPUs, most of it in the CPU
+checks and in starting the timing processes. The `large` config needs
+18.7 GiB of device memory, for the FP32
 dense backward, and about 30 GiB of host memory for the CPU check. On a
 device with less memory, pass only the configs that fit, and say so in the
 notes you commit.
 
+The weights and momentum are copied to the device in 128 MiB slices. With
+compute-runtime 26.31 on BMG, a host-to-device copy of 512 MiB or more from
+pageable memory is mapped for the copy engine as an external host pointer,
+and the copy can then fault the engine. On the B60 nodes used for the
+baseline (host kernel 7.0.0-38), a single copy of the 8.2 GB `large` table
+failed intermittently, with `UR_RESULT_ERROR_DEVICE_LOST`, or with
+`UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY` that left the memory held, also with a
+plain `tensor.to("xpu")` and no benchmark code. See
+[intel/torch-xpu-ops#5867](https://github.com/intel/torch-xpu-ops/issues/5867)
+and [intel/compute-runtime#948](https://github.com/intel/compute-runtime/issues/948).
+
 The BMG baseline was recorded on one B60 in a Kubernetes pod limited to 4
-CPUs and 32 GiB of memory, with `OMP_NUM_THREADS=4`. Three more runs of the
-same command on the same pod agreed with it within the noise given under
-Reading the numbers below.
+CPUs and 32 GiB of memory, with `OMP_NUM_THREADS=4`. Three earlier runs of
+the same timing code on the same pod, without `skewed`, agreed with it
+within the noise given under Reading the numbers below.
 
 ### What the benchmark measures
 
 - **Workloads:** each config in [`../tbe/configs`](../tbe/configs) is a
   `TBEDataConfig`, loaded with `TBEDataConfig.from_json`. Indices and offsets
   come from upstream's `generate_requests`, seeded with `--seed`, and are
-  moved to XPU. All three use D = 128, the DLRM v3 XPU
-  `hstu_transducer_embedding_dim`, a fixed bag length L, int64 indices and
-  offsets, and upstream's default near-uniform Zipf distribution,
-  q = 0.1 and s = 0.1:
+  moved to XPU. All four use D = 128, the DLRM v3 XPU
+  `hstu_transducer_embedding_dim`, a fixed bag length L, and int64 indices
+  and offsets. `small`, `medium` and `large` use upstream's default
+  near-uniform Zipf distribution, q = 0.1 and s = 0.1, under which a row is
+  read at most 4, 6 and 11 times. Real indices are skewed: at GR's default
+  MovieLens batch of 128, the sex feature puts about 64 samples on each of
+  its two rows. `skewed` therefore uses q = 1 and s = 1.05. Its most read row
+  is read 10,339 times, 964 rows 32 to 1,024 times and 31 rows more often,
+  so it reaches the paths of the XPU backward for repeated rows: a CTA per
+  row from 32 lookups, and several work-groups with atomics above 1,024.
 
   | Config | `num_tables` (T) | `num_embeddings` (E) | `batch_size` (B) | `bag_size` (L) | `total_lengths` (lookups) | FP32 weights |
   | --- | --- | --- | --- | --- | --- | --- |
   | `small` | 4 | 100,000 | 512 | 20 | 40,960 | 205 MB |
   | `medium` | 8 | 1,000,000 | 2,048 | 20 | 327,680 | 4.1 GB |
   | `large` | 16 | 1,000,000 | 4,096 | 50 | 3,276,800 | 8.2 GB |
+  | `skewed` | 4 | 1,000,000 | 2,048 | 50 | 409,600 | 2.0 GB |
 
   Every config sets `use_cpu` to true: otherwise `generate_requests` places
   its tensors on CUDA or MTIA. The benchmark rejects configs the XPU kernels
-  cannot run: weighted, mixed dimensions, variable batch sizes (VBE) or
-  variable bag lengths.
+  cannot run: weighted, mixed dimensions or variable batch sizes (VBE). It
+  also rejects per-table `Es`, `embedding_specs` and `feature_table_map`,
+  which this harness does not lay out. Variable bag lengths are accepted,
+  either drawn around L with `sigma_L` or set per table with `Ls`, as in
+  DLRM-v3's mix of a jagged history and single-ID features: the kernels read
+  the length of each bag from the offsets. `bag_size` is then the mean bag
+  length.
 - **Precisions:** FP32 and FP16 weights, FP32 output.
 - **Optimiser and initialisation:** the optimiser is upstream
   `tbe_training_benchmark.py`'s default: rowwise Adagrad with a learning rate
@@ -227,10 +251,17 @@ Reading the numbers below.
   `torch.testing.assert_close` before anything is timed. Both start from the
   same initial state. The split lookup is compared with FBGEMM's own CPU
   kernel for the operator, on the output and the updated weights and
-  momentum. The dense lookup is compared with a plain torch gather and
-  `index_add_`, on the output and the gradient of the whole table, because
-  FBGEMM's CPU dense kernel sum-pools whatever the pooling mode. If any case
-  mismatches, the run fails and no CSV is written.
+  momentum. The dense lookup is compared with a plain torch gather and a
+  float64 `index_add_`, on the output and the gradient of the whole table,
+  because FBGEMM's CPU dense kernel sum-pools whatever the pooling mode. A
+  gradient element sums the output gradients of every lookup of its row,
+  and the rounding of a float32 sum of n terms grows like √n, so the
+  gradient's absolute tolerance is the default 1e-5 times the square root
+  of the most read row's lookups: 1.0e-3 for `skewed`, where the XPU
+  gradient is 4.8e-5 from float64. A float32 reference was further from
+  float64 than the XPU kernel, 1.2e-3, and failed it. A lookup left out of
+  the gradient moves its row by about 1 and still fails the check. If any
+  case mismatches, the run fails and no CSV is written.
 - **Timing:** the median of 100 iterations, with the same XPU event timing,
   cache flush and GPU lead as the jagged sweep, described under
   [What the sweep measures](#what-the-sweep-measures). The forward times one
@@ -240,6 +271,16 @@ Reading the numbers below.
   `torch.autograd.grad`, so the gradient is not accumulated into `.grad`. The
   split lookup runs `torch.autograd.backward`, whose in-place update moves
   the weights at every iteration, as in training.
+- **One process per case:** each case is timed in a newly spawned process,
+  after its CPU check in the benchmark's own process. The process rebuilds
+  the batch and the initial state from `--seed`, and the benchmark fails if
+  the batch differs from the one it checked. In one shared process, the
+  forward time depends on the device allocations of the earlier cases: on a
+  B60, the small FP32 dense forward took 92.6 µs in a fresh process,
+  140.8 µs after the dense CPU check and 190.6 µs after an earlier dense
+  timing. With a process per case, the rows do not depend on the case order,
+  so a run with `--families`, `--dtypes` or fewer configs reproduces the
+  same rows of the full run.
 
 The operators are called directly through `torch.ops.fbgemm`, not through
 `SplitTableBatchedEmbeddingBagsCodegen` or
@@ -252,10 +293,13 @@ and Python dispatch.
 `gb_per_s` follows upstream `tbe_training_benchmark.py` for no-bag lookups,
 so it can be compared with upstream's figures:
 
-- forward bytes = B × T × L × D × (weight bytes + output bytes);
+- forward bytes = `total_lengths` × D × (weight bytes + output bytes);
 - backward bytes = 2 × forward bytes.
 
-The formula counts the embedding rows read and the output written.
+The formula counts the embedding rows read and the output written. With a
+fixed L, `total_lengths` is B × T × L, upstream's count; with variable bag
+lengths it is the number of indices actually drawn, where upstream would
+still use L.
 
 #### Reading the numbers
 
@@ -268,14 +312,18 @@ The formula counts the embedding rows read and the output written.
   times include that wait, which is part of the operator's cost. 
 - The dense backward also zero-fills and writes its gradient of the whole
   table, T × E × D values, whatever the batch. It is therefore slower than
-  the split backward: in FP32, 7.8 ms against 3.6 ms at `medium` and 29.1 ms
+  the split backward: in FP32, 7.9 ms against 3.8 ms at `medium` and 29.1 ms
   against 23.4 ms at `large` on a B60.
 - FP16 weights cut the `medium` and `large` forward times by about 20%, close
   to the 25% fewer bytes the bandwidth formula counts.
-- Over four runs on one B60, forward times varied by at most 1.2%, and the
-  `large` backwards by at most 2%. The `small` and `medium` backwards, where
+- The `skewed` forward reports about 506 GB/s in FP32 on a B60, above the
+  456 GB/s its memory is rated at. The formula counts every lookup as a
+  row read from memory, but the most read rows, thousands of lookups each,
+  stay in the cache.
+- Over four runs on one B60, forward times varied by at most 0.5%, and the
+  `large` backwards by at most 0.8%. The `small` and `medium` backwards, where
   the host round trip weighs most and the pod had only 4 CPUs, varied by up
-  to 20%. Treat changes smaller than that as noise.
+  to 15%. Treat changes smaller than that as noise.
 
 ### Not benchmarked on XPU
 
@@ -293,6 +341,4 @@ The formula counts the embedding rows read and the output written.
   modules above.
 
 For the same reason, the upstream TBE training tests
-(`fbgemm_gpu/test/tbe/training/`) do not run on XPU. The upstream
-`fbgemm_gpu/test/tbe/bench/` tests, which cover the `TBEDataConfig` loading
-the committed configs rely on, run unpatched in CI.
+(`fbgemm_gpu/test/tbe/training/`) do not run on XPU.

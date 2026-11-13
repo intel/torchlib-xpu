@@ -30,7 +30,23 @@ def small_config_path():
 
 
 def test_committed_configs_exist():
-    assert [p.stem for p in _CONFIGS] == ["large", "medium", "small"]  # nosec B101
+    assert [p.stem for p in _CONFIGS] == [  # nosec B101
+        "large",
+        "medium",
+        "skewed",
+        "small",
+    ]
+
+
+def test_skewed_config_reaches_the_repeated_row_backward_paths():
+    # The XPU backward has a CTA-per-row path from 32 lookups of a row and
+    # several work-groups with atomics above 1,024; near-uniform indices
+    # repeat a row at most 11 times in the other configs.
+    config = tbe_training.load_config(next(p for p in _CONFIGS if p.stem == "skewed"))
+    indices, offsets, _ = tbe_training._request(config, 0)
+    counts = torch.bincount(tbe_training._table_rows(config, indices, offsets))
+    assert ((counts >= 32) & (counts <= 1024)).sum() > 100  # nosec B101
+    assert (counts > 1024).sum() > 10  # nosec B101
 
 
 @pytest.mark.parametrize("path", _CONFIGS, ids=lambda p: p.stem)
@@ -105,6 +121,29 @@ def test_smoke_config_shrinks_only_sizes(small_config_path):
         4,
     )
     assert (smoke.T, smoke.D) == (config.T, config.D)  # nosec B101
+
+
+def test_dense_reference_accumulates_in_float64(small_config_path):
+    # One row read 1,001 times: a float32 sum in order would lose every 1
+    # added to 2**24, while float64 gives 2**24 + 1000, which float32 holds.
+    config = tbe_training.load_config(small_config_path)
+    config = dataclasses.replace(
+        config,
+        T=1,
+        E=1,
+        D=1,
+        batch_params=dataclasses.replace(config.batch_params, B=1),
+        pooling_params=dataclasses.replace(config.pooling_params, L=1001),
+    )
+    indices = torch.zeros(1001, dtype=torch.int64)
+    offsets = torch.tensor([0, 1001])
+    grad_out = torch.ones(1001, 1)
+    grad_out[0] = 2**24
+    initial = {"weights": torch.zeros(1)}
+    _, (grad,), _ = tbe_training._dense_reference(
+        config, indices, offsets, initial, grad_out
+    )
+    assert grad.item() == 2**24 + 1000  # nosec B101
 
 
 def test_chunked_check_finds_mismatch_past_first_chunk(monkeypatch):

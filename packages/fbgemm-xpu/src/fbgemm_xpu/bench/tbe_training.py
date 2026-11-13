@@ -40,6 +40,7 @@ import dataclasses
 import functools
 import hashlib
 import logging
+import math
 import multiprocessing
 import os
 from collections.abc import Callable
@@ -393,6 +394,20 @@ def _run_once(
     )
 
 
+def _table_rows(
+    config: TBEDataConfig, indices: torch.Tensor, offsets: torch.Tensor
+) -> torch.Tensor:
+    """The row of the stacked tables that each lookup reads."""
+    T, E, B = config.T, config.E, config.batch_params.B
+    # Bags are table-major: bag b belongs to table b // B.
+    bag_table = torch.arange(T).repeat_interleave(B)
+    return bag_table.repeat_interleave(offsets.diff()) * E + indices.long()
+
+
+# Lookups whose output gradient is converted to float64 at once.
+_REFERENCE_CHUNK = 1 << 20
+
+
 def _dense_reference(
     config: TBEDataConfig,
     indices: torch.Tensor,
@@ -405,15 +420,25 @@ def _dense_reference(
     FBGEMM's CPU kernel for the dense lookup sum-pools whatever the pooling
     mode, so it cannot check the no-bag path: the forward gathers the rows, and
     the backward scatter-adds the output gradient into the whole table.
+
+    The backward accumulates in float64. A row read thousands of times, as
+    skewed indices produce, sums thousands of output gradients, and a float32
+    sum in index_add's order is then less accurate than the XPU kernel it
+    checks. Only the rows the batch reads are accumulated, so float64 costs
+    host memory per lookup rather than per table row.
     """
-    T, E, D, B = config.T, config.E, config.D, config.batch_params.B
-    # Bags are table-major: bag b belongs to table b // B.
-    bag_table = torch.arange(T).repeat_interleave(B)
-    rows = bag_table.repeat_interleave(offsets.diff()) * E + indices.long()
+    T, E, D = config.T, config.E, config.D
+    rows = _table_rows(config, indices, offsets)
     weights = initial["weights"]
     out = weights.view(T * E, D)[rows].to(OUTPUT_DTYPE.as_dtype())
-    grad = torch.zeros(T * E, D).index_add_(0, rows, grad_out.float())
-    return out, [grad.to(weights.dtype).flatten()], {}
+    read, slot = rows.unique(return_inverse=True)
+    sums = torch.zeros(read.numel(), D, dtype=torch.float64)
+    for start in range(0, rows.numel(), _REFERENCE_CHUNK):
+        end = start + _REFERENCE_CHUNK
+        sums.index_add_(0, slot[start:end], grad_out[start:end].double())
+    grad = torch.zeros(T * E, D, dtype=weights.dtype)
+    grad[read] = sums.to(weights.dtype)
+    return out, [grad.flatten()], {}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -451,8 +476,9 @@ LOOKUPS: dict[str, Lookup] = {
 }
 REFERENCES: dict[str, Reference] = {
     "dense": Reference(
-        "a plain torch gather and index_add on CPU (FBGEMM's CPU dense kernel "
-        "sum-pools even for no-bag lookups)",
+        "a plain torch gather and a float64 index_add on CPU (FBGEMM's CPU dense "
+        "kernel sum-pools even for no-bag lookups), the gradient within the "
+        "default tolerance scaled by the square root of the most repeated row",
         _dense_reference,
     ),
     "split": Reference("FBGEMM's CPU kernel for the same operator, host weights"),
@@ -504,8 +530,15 @@ def check_against_cpu(
     _assert_close_chunked(out_xpu, out_cpu, f"{name} fwd")
     if len(grads_xpu) != len(grads_cpu):
         raise AssertionError(f"{name} bwd: {len(grads_xpu)} != {len(grads_cpu)} grads")
+    # A gradient element sums the output gradient of every lookup of its row,
+    # and the rounding of a float32 sum of n terms grows like sqrt(n): with the
+    # 10,339 lookups of the skewed config's most read row the XPU kernel is
+    # 4.8e-5 from float64, above the default 1e-5. A lost or doubled term moves
+    # an element by about 1, far above either.
+    repeats = int(torch.bincount(_table_rows(config, indices, offsets)).max())
+    grad_atol = _DEFAULT_ATOL * math.sqrt(repeats)
     for g_xpu, g_cpu in zip(grads_xpu, grads_cpu):
-        _assert_close_chunked(g_xpu, g_cpu, f"{name} bwd")
+        _assert_close_chunked(g_xpu, g_cpu, f"{name} bwd", atol=grad_atol)
     for key in lookup.state:
         _assert_close_chunked(state_xpu[key], state_cpu[key], f"{name} bwd {key}")
 
@@ -515,13 +548,24 @@ def check_against_cpu(
 # host memory the check needs.
 _CHECK_CHUNK = 1 << 24
 
+# assert_close's default tolerances, as it takes both or neither.
+_DEFAULT_ATOL = 1e-5
+_DEFAULT_RTOL = {torch.float32: 1.3e-6, torch.float16: 1e-3, torch.bfloat16: 1.6e-2}
+
 
 def _assert_close_chunked(
-    actual: torch.Tensor, expected: torch.Tensor, what: str
+    actual: torch.Tensor,
+    expected: torch.Tensor,
+    what: str,
+    atol: float | None = None,
 ) -> None:
+    """assert_close in chunks; ``atol`` replaces the default, rtol stays."""
     if actual.shape != expected.shape or actual.dtype != expected.dtype:
         # Fails on the metadata before comparing any values.
         torch.testing.assert_close(actual, expected, msg=lambda m: f"{what}: {m}")
+    tolerance = (
+        {} if atol is None else {"atol": atol, "rtol": _DEFAULT_RTOL[expected.dtype]}
+    )
     actual, expected = actual.reshape(-1), expected.reshape(-1)
     for start in range(0, actual.numel(), _CHECK_CHUNK):
         end = start + _CHECK_CHUNK
@@ -529,6 +573,7 @@ def _assert_close_chunked(
             actual[start:end],
             expected[start:end],
             msg=lambda m, start=start: f"{what}, from flat element {start}: {m}",
+            **tolerance,
         )
 
 

@@ -192,6 +192,10 @@ jobs:
       fbgemm-xpu: ${{ case(github.event_name == 'release', 'true',
                         github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'test-all'), 'true',
                         steps.changes.outputs.fbgemm-xpu || 'false') }}
+      dlrm-v3: ${{ case(github.event_name == 'release', 'true',
+                     github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'test-all'), 'true',
+                     github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'test-dlrm-v3'), 'true',
+                     steps.changes.outputs.dlrm-v3 || 'false') }}
     steps:
       - name: 'Checkout'
         if: github.event_name != 'release'
@@ -209,6 +213,9 @@ jobs:
               - 'packages/torchcodec-xpu/**'
             fbgemm-xpu:
               - 'packages/fbgemm-xpu/**'
+            dlrm-v3:
+              - 'packages/fbgemm-xpu/**'
+              - '.github/workflows/ci.yml'
 
   test-torchcodec:
     needs: [ build, identify-changes ]
@@ -399,7 +406,10 @@ jobs:
 
   test-fbgemm:
     needs: [ build, identify-changes ]
-    if: needs.identify-changes.outputs.fbgemm-xpu == 'true'
+    # Also runs whenever test-dlrm-v3 runs, which needs it to pass.
+    if: >-
+      needs.identify-changes.outputs.fbgemm-xpu == 'true'
+      || needs.identify-changes.outputs.dlrm-v3 == 'true'
     strategy:
       max-parallel: 1
       matrix:
@@ -540,8 +550,179 @@ jobs:
         # Exercises the benchmark patch on every run.
         python fbgemm_gpu/bench/jagged_tensor_benchmark.py device --batch-size 8 --max-len 16
 
+  # End-to-end DLRM-v3 on XPU across the integrated stack: fbgemm-xpu (built
+  # above) + FBGEMM + TorchRec + generative-recommenders (DLRM-v3). Every
+  # external source is pinned to a commit in `env` below; the steps' logic is
+  # in .github/scripts/dlrm-v3, which read the pins from that environment.
+  test-dlrm-v3:
+    needs: [ build, identify-changes, test-fbgemm ]
+    if: needs.identify-changes.outputs.dlrm-v3 == 'true'
+    strategy:
+      max-parallel: 1
+      matrix:
+        # Testing in minimum and maximum supported versions of python.
+        python-version: [ '3.10', '3.14' ]
+        runner: [ 'bmg' ]
+        include:
+          # NumPy 2.5.3 and pandas 3.0.5 need Python 3.12+; 3.10 uses the
+          # newest NumPy and pandas releases that still support it.
+          - python-version: '3.10'
+            numpy: '2.2.6'
+            pandas: '2.3.3'
+          - python-version: '3.14'
+            numpy: '2.5.3'
+            pandas: '3.0.5'
+    runs-on: ${{matrix.runner}}
+    timeout-minutes: 150
+    container:
+      image: 'ubuntu:24.04'
+      # DataLoader workers and spawned ranks exchange tensors through /dev/shm.
+      options: --device /dev/dri:/dev/dri -v /dev/dri/by-path:/dev/dri/by-path --shm-size=8g
+    env:
+      PYTHON_VERSION: ${{ matrix.python-version }}
+      WHEELS: torchlib-${{ matrix.python-version }}-wheels
+      # aagalleg/FBGEMM#1 (ComputeDevice.XPU): its Python changes are applied
+      # over the fbgemm-gpu-cpu 1.9.0 wheel. BASE is the PR's base commit.
+      FBGEMM_PR_REPO: aagalleg/FBGEMM
+      FBGEMM_PR_BASE: c0c345570fed8ae3c8850dcf3bd1b37961aafbb8
+      FBGEMM_PR_HEAD: f2e945395a299b3738fbe66c664c7ed1ecd09666
+      # manuelhsantana/torchrec#3 (XPU in planner, sharding, training) with
+      # manuelhsantana/torchrec#4 (quantized inference) merged into it.
+      TORCHREC_REPO: manuelhsantana/torchrec
+      TORCHREC_SHA: 072b992e6b5cee372548fb62fbecf12c9e553dc2
+      # aagalleg/generative-recommenders#3: DLRM-v3 training on XPU.
+      GR_TRAIN_REPO: aagalleg/generative-recommenders
+      GR_TRAIN_SHA: 6ecb92103da2c0d251759d84b65c53664c4bb29a
+      ML1M_URL: https://files.grouplens.org/datasets/movielens/ml-1m.zip
+      ML1M_SHA256: a6898adb50b9ca05aa231689da44c217cb524e7ebd39d264c56e2832f2c54e20
+      # sasrec_format.csv written by GR's preprocessor from that archive, seeded
+      # and with a stable sort (see 'Prepare MovieLens-1M').
+      ML1M_PREPARED_SHA256: 9c00321c268f9eec22b18ceac14a909d7fa066f47f5e0eff1e4091ef6b965eeb
+    steps:
+    - name: 'Cleanup'
+      run: |
+        # Workspaces persist on self-hosted runners; start from a clean state.
+        rm -rf .torchlib-xpu-venv _e2e _tools _wheels
+        rm -rf gr-train torchlib-xpu torchrec
+    - name: 'Set AGENT_TOOLSDIRECTORY'
+      run: |
+        # For https://github.com/actions/setup-python/issues/1087
+        echo "AGENT_TOOLSDIRECTORY=$GITHUB_WORKSPACE/_tools" >> $GITHUB_ENV
+        echo "E2E=$GITHUB_WORKSPACE/_e2e" >> $GITHUB_ENV
+        echo "VENV=$GITHUB_WORKSPACE/.torchlib-xpu-venv" >> $GITHUB_ENV
+        echo "SCRIPTS=$GITHUB_WORKSPACE/torchlib-xpu/.github/scripts/dlrm-v3" >> $GITHUB_ENV
+    - name: 'Install prerequisites'
+      run: |
+        apt-get update
+        # build-essential: the Triton launcher is compiled at runtime.
+        apt-get install -y \
+          build-essential \
+          ca-certificates \
+          curl \
+          git \
+          gpg \
+          patch \
+          software-properties-common \
+          unzip \
+          wget
+        git config --global user.email "nobody@intel.com"
+        git config --global user.name "Nobody"
+        mkdir -p "$E2E/logs"
+    - name: 'Install Intel drivers'
+      run: |
+        add-apt-repository -y ppa:kobuk-team/intel-graphics
+        apt-get install -y \
+          intel-ocloc \
+          libze-dev \
+          libze-intel-gpu1 \
+          libze1
+    - name: 'Download wheels'
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}
+        path: _wheels/
+    - name: 'Checkout torchlib-xpu'
+      uses: actions/checkout@v7
+      with:
+        path: torchlib-xpu
+    - name: 'Checkout TorchRec'
+      uses: actions/checkout@v7
+      with:
+        repository: ${{ env.TORCHREC_REPO }}
+        ref: ${{ env.TORCHREC_SHA }}
+        path: torchrec
+    - name: 'Checkout generative-recommenders (training)'
+      uses: actions/checkout@v7
+      with:
+        repository: ${{ env.GR_TRAIN_REPO }}
+        ref: ${{ env.GR_TRAIN_SHA }}
+        path: gr-train
+    - name: 'Set up Python ${{ env.PYTHON_VERSION }}'
+      uses: actions/setup-python@v7
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    - name: 'Create virtual environment'
+      run: |
+        python -m venv "$VENV"
+        echo "$VENV/bin" >> $GITHUB_PATH
+    - name: 'Install fbgemm-xpu'
+      run: |
+        # Pulls torch (XPU) and fbgemm-gpu-cpu==1.9.0.
+        pip install --no-cache-dir \
+          "$(ls ./_wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/fbgemm_xpu*.whl)" \
+          --extra-index-url https://download.pytorch.org/whl/xpu
+    - name: 'Install TorchRec and DLRM-v3 dependencies'
+      env:
+        NUMPY_VERSION: ${{ matrix.numpy }}
+        PANDAS_VERSION: ${{ matrix.pandas }}
+      run: |
+        "$SCRIPTS/install-dependencies.sh" torchrec
+    - name: 'Apply aagalleg/FBGEMM#1 over fbgemm-gpu-cpu 1.9.0'
+      run: |
+        "$SCRIPTS/apply-fbgemm-pr.sh"
+    - name: 'Test stack on XPU (FBGEMM, TorchRec, fbgemm-xpu)'
+      env:
+        # XCCL loads oneCCL from the virtual environment.
+        CCL_ROOT: ${{ env.VENV }}
+        LD_LIBRARY_PATH: ${{ env.VENV }}/lib:${{ env.LD_LIBRARY_PATH }}
+      run: |
+        python "$SCRIPTS/test_stack.py"
+    - name: 'Test TorchRec XPU changes (device-agnostic unit tests)'
+      working-directory: torchrec
+      run: |
+        # The test files changed by torchrec#3; they mock the
+        # accelerator and run on the CPU.
+        PYTHONPATH="$PWD" pytest -rsf -p no:cacheprovider \
+          torchrec/distributed/planner/tests/test_constants.py \
+          torchrec/distributed/planner/tests/test_storage_reservations.py \
+          torchrec/distributed/planner/tests/test_types.py \
+          torchrec/distributed/planner/tests/test_utils.py \
+          torchrec/distributed/tests/test_embedding_types.py \
+          torchrec/distributed/tests/test_sharding_plan.py \
+          torchrec/distributed/tests/test_utils.py
+    - name: 'Prepare MovieLens-1M'
+      run: |
+        "$SCRIPTS/prepare-movielens-1m.sh" gr-train
+    - name: 'Run DLRM-v3 training on XPU (train-eval smoke)'
+      env:
+        CCL_ROOT: ${{ env.VENV }}
+        LD_LIBRARY_PATH: ${{ env.VENV }}/lib:${{ env.LD_LIBRARY_PATH }}
+      run: |
+        "$SCRIPTS/run-training.sh" gr-train
+    - name: 'Check DLRM-v3 training log'
+      run: |
+        python "$SCRIPTS/check_training_log.py" "$E2E/logs/train.log"
+    - name: 'Upload DLRM-v3 logs'
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: dlrm-v3-logs-${{ matrix.python-version }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}
+        path: |
+          _e2e/logs
+        if-no-files-found: ignore
+
   publish:
-    needs: [ compose, test-torchcodec, test-fbgemm ]
+    needs: [ compose, test-torchcodec, test-fbgemm, test-dlrm-v3 ]
     if: ${{ !(failure() || cancelled()) }}
     runs-on: ubuntu-24.04
     permissions:

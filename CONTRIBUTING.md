@@ -137,11 +137,7 @@ pytest -rsf fbgemm_gpu/test/sparse/permute_sparse_features_test.py
 pytest -rsf fbgemm_gpu/test/sparse/reorder_batched_test.py
 pytest -rsf fbgemm_gpu/test/tbe/utils/generate_vbe_metadata_test.py
 pytest -rsf fbgemm_gpu/test/tbe/utils/split_embeddings_utils_test.py
-pytest -rsf fbgemm_gpu/test/tbe/bench/tbe_data_config_loader_test.py
-pytest -rsf fbgemm_gpu/test/tbe/bench/tbe_data_config_models_test.py
 ```
-
-The two `tbe/bench` tests run unpatched. They cover `TBEDataConfig` loading and serialisation, which the TBE training benchmark's committed workload configs rely on.
 
 ## How to benchmark Intel® plugin for FBGEMM
 
@@ -184,7 +180,7 @@ The table batched embedding (TBE) training lookups are benchmarked with the `tbe
 
 ```
 ZE_AFFINITY_MASK=0 python -m fbgemm_xpu.bench.tbe_training \
-  packages/fbgemm-xpu/bench/tbe/configs/{small,medium,large}.json \
+  packages/fbgemm-xpu/bench/tbe/configs/{small,medium,large,skewed}.json \
   --output tbe_training.csv
 ```
 
@@ -192,7 +188,7 @@ It can be narrowed with `--dtypes` (`float32`, `float16`), `--families` (`dense`
 
 ```
 python -m fbgemm_xpu.bench.tbe_training --smoke \
-  packages/fbgemm-xpu/bench/tbe/configs/{small,medium,large}.json --output tbe_training_smoke.csv
+  packages/fbgemm-xpu/bench/tbe/configs/{small,medium,large,skewed}.json --output tbe_training_smoke.csv
 ```
 
 ## Tips

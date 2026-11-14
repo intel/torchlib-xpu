@@ -916,6 +916,7 @@ UniqueAVFrame XpuDeviceInterface::convert_tensor_to_av_frame_for_encoding_with_s
       zeCtx, &alloc_desc, desc.objects[0].size, 0, zeDevice, &usm_ptr);
 
   if (res != ZE_RESULT_SUCCESS) {
+    close(desc.objects[0].fd);
     TORCH_CHECK(
         false,
         "zeMemAllocDevice failed importing encode surface fd=",

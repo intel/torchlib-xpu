@@ -8,7 +8,7 @@
 // @lint-ignore LINTIGNORE
 // @lint-ignore-every CLANGFORMAT
 // clang-format off
-// Note: clang-format off doesn't work with this templated code,
+// Note: clang-format off doesn't work with this templaterized code,
 // so we need to keep lint-ignore-every.
 #}
 

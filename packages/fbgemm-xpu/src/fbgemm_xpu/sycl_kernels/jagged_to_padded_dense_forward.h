@@ -9,7 +9,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 //
 // This file contains the SYCL/XPU host implementation of the
-// jagged_to_padded_dense_forward operator, ported from FBGEMM CUDA
+// jagged_to_padded_dense_forward operator, ported from FBGEMM CUDA.
 //
 // ORIGINAL CUDA SOURCE:
 //   File: fbgemm_gpu/src/jagged_tensor_ops/jagged_to_padded_dense_forward.cu

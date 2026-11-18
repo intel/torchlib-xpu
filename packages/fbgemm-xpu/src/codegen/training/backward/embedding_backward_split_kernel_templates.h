@@ -8,7 +8,7 @@
 // @lint-ignore LINTIGNORE
 // @lint-ignore-every CLANGFORMAT
 // clang-format off
-// Note: clang-format off doesn't work with this templaterized code,
+// Note: clang-format off doesn't work with this templated code,
 // so we need to keep lint-ignore-every.
 #}
 
@@ -770,7 +770,7 @@ namespace fbgemm_xpu {
     ////////////////////////////////////////////////////////////////////////////////
     //
     // CUDA SOURCE MAPPING:
-    //   CUDA Kernel:   split_embedding_nobag_backward_codegen_{{ "dense" if dense else "codegen_rowwise_adagrad" }}_unweighted_kernel_cta_per_row_1
+    //   CUDA Kernel:   split_embedding_nobag_backward_codegen_{{ "dense" if dense else "rowwise_adagrad" }}_unweighted_kernel_cta_per_row_1
     //   CUDA File:     fbgemm_gpu/_skbuild/linux-x86_64-3.10/cmake-build/gen_embedding_backward_{{ "dense" if dense else "rowwise_adagrad" }}_split_unweighted_nobag_kernel_cta.cu
     //   CUDA Template: fbgemm_gpu/codegen/training/backward/embedding_backward_split_kernel_cta_template.cu
     //

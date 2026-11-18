@@ -331,3 +331,4 @@ if __name__ == "__main__":
     # handler, so basicConfig would be a no-op.
     logging.getLogger().setLevel(logging.INFO)
     jagged_sweep(prog_name=f"python -m {_MODULE}")
+

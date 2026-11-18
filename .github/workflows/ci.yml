@@ -491,6 +491,14 @@ jobs:
         # timings themselves are not used, so the PVC baseline is not compared
         # against this runner.
         python -m fbgemm_xpu.bench.jagged_sweep --smoke --output "$RUNNER_TEMP/jagged_sweep_smoke.csv"
+    - name: 'Smoke run TBE training benchmark'
+      run: |
+        # Loads the committed workload configs, shrinks them and checks the
+        # dense and split lookups against CPU before timing; the timings are
+        # not used.
+        python -m fbgemm_xpu.bench.tbe_training --smoke \
+          torchlib-xpu/packages/fbgemm-xpu/bench/tbe/configs/*.json \
+          --output "$RUNNER_TEMP/tbe_training_smoke.csv"
     - name: 'Patch upstream FBGEMM tests and benchmarks'
       working-directory: fbgemm
       run: |

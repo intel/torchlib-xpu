@@ -15,21 +15,17 @@ here, so the CSV stays a plain table that GitHub renders.
 """
 
 import csv
-import datetime
 import functools
 import logging
 import os
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 
 import click
-import fbgemm_gpu
 import torch
 
-import fbgemm_xpu
-from fbgemm_xpu.bench.bench_utils import benchmark_torch_function, gpu_lead_method
+from fbgemm_xpu.bench.bench_utils import benchmark_torch_function
+from fbgemm_xpu.bench.run_notes import notes_markdown, notes_path, run_metadata
 
 _MODULE = "fbgemm_xpu.bench.jagged_sweep"
 
@@ -117,51 +113,6 @@ def _int_list(value: str) -> list[int]:
     return [int(v) for v in value.split(",")]
 
 
-def _sweep_metadata(**spec: object) -> dict[str, object]:
-    return {
-        "command": " ".join(["python", "-m", _MODULE, *sys.argv[1:]]),
-        "date_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(
-            timespec="seconds"
-        ),
-        "device": torch.xpu.get_device_name(),
-        "driver": torch.xpu.get_device_properties().driver_version,
-        "ze_affinity_mask": os.environ.get("ZE_AFFINITY_MASK", ""),
-        "torch": torch.__version__,
-        "fbgemm_gpu": getattr(fbgemm_gpu, "__version__", "unknown"),
-        "fbgemm_xpu": fbgemm_xpu.__version__,
-        "timing": "median of XPU event times, 2 warm-ups, "
-        f"{2 * torch.xpu.get_device_properties().last_level_cache_size >> 20} MB "
-        "cache flush (2x last-level cache, written, then a second buffer "
-        "read so the cache is left clean) per iteration, then "
-        f"{gpu_lead_method()} sized from the fastest warm-up "
-        "so the GPU does not wait for the host in the timed window",
-        "lengths": "uniform integers in [0, max_len], one draw per shape",
-        **spec,
-    }
-
-
-def _metadata_path(output: str) -> Path:
-    return Path(output).with_suffix(".md")
-
-
-def _metadata_markdown(csv_name: str, metadata: dict[str, object], fields: list[str]) -> str:
-    # One table row per key; the CSV itself carries no comments so that it
-    # renders as a table on GitHub. Pipes in values would break the table.
-    lines = [
-        f"# {csv_name}",
-        "",
-        f"Timings of the XPU jagged operators written by `{metadata['command']}`.",
-        f"Columns: {', '.join(f'`{f}`' for f in fields)}.",
-        "",
-        "| Key | Value |",
-        "| --- | --- |",
-    ]
-    for key, value in metadata.items():
-        cell = str(value).replace("|", "\\|")
-        lines.append(f"| {key} | {cell} |")
-    return "\n".join(lines) + "\n"
-
-
 def _check_against_cpu(
     name: str,
     family: SweepFamily,
@@ -238,7 +189,9 @@ def jagged_sweep(
     sweep_families = {f: SWEEP_FAMILIES[f] for f in families.split(",")}
 
     torch.manual_seed(seed)
-    metadata = _sweep_metadata(
+    metadata = run_metadata(
+        _MODULE,
+        lengths="uniform integers in [0, max_len], one draw per shape",
         batch_sizes=batch_sizes,
         max_lens=max_lens,
         embedding_dim=embedding_dim,
@@ -321,8 +274,12 @@ def jagged_sweep(
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
-    notes = _metadata_path(output)
-    notes.write_text(_metadata_markdown(os.path.basename(output), metadata, fields))
+    notes = notes_path(output)
+    notes.write_text(
+        notes_markdown(
+            os.path.basename(output), "the XPU jagged operators", metadata, fields
+        )
+    )
     logging.info(f"Wrote {len(rows)} rows to {output} and the run's notes to {notes}")
 
 

@@ -22,7 +22,7 @@ on:
       - 'release/**'
   release:
     types:
-      - published      
+      - published
 
 permissions: read-all
 
@@ -312,9 +312,9 @@ jobs:
         ref: v0.17.0
         path: torchcodec
     - name: 'Checkout ffmpeg'
-      uses: actions/checkout@v7 
-      with: 
-        repository: FFmpeg/FFmpeg 
+      uses: actions/checkout@v7
+      with:
+        repository: FFmpeg/FFmpeg
         ref: ${{ matrix.ffmpeg-version }}
         path: ffmpeg
     - name: 'Patch torchcodec'
@@ -545,7 +545,7 @@ jobs:
     if: ${{ !(failure() || cancelled()) }}
     runs-on: ubuntu-24.04
     permissions:
-      id-token: write    
+      id-token: write
     env:
       WHEELS: torchlib-all-wheels
     steps:

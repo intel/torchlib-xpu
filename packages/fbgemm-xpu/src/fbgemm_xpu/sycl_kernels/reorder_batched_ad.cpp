@@ -152,7 +152,7 @@ void NarrowBatchedBroadcastIndicesKernel<Dtype, index_t>::operator()(
             static_cast<uint32_t>(kThreadGroupSize);
     const auto table_id = warp_id / num_ads_in_batch;
     const auto warp_id_in_table = warp_id % num_ads_in_batch;
-    // warps in a table equally splited for each B
+    // warps in a table equally split for each B
     const auto num_warp_in_batch = num_ads_in_batch / B;
     const auto batch_id = warp_id_in_table / num_warp_in_batch;
     if (table_id >= T_ || batch_id >= B) {
@@ -412,11 +412,11 @@ at::Tensor reorder_batched_ad_lengths_xpu(
     const int64_t grid_size_uncapped = (B * T + 32 - 1) / 32;
     TORCH_CHECK(
         grid_size_uncapped >= 0,
-        "grid_size must be positive, got ",
+        "grid_size must be non-negative, got ",
         grid_size_uncapped,
-        " where B =",
+        " where B = ",
         B,
-        " and T =",
+        " and T = ",
         T);
 
     const uint32_t grid_size = xpu_cap_grid_dim_x(grid_size_uncapped, 32 * 32);

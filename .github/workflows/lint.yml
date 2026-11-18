@@ -35,3 +35,7 @@ jobs:
     - name: 'Test with ruff'
       run: |
         ruff check -v
+    - name: 'Check whitespace and file endings'
+      run: |
+        python3 -m pip install pre-commit
+        pre-commit run --all-files --show-diff-on-failure

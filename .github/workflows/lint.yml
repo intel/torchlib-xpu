@@ -26,16 +26,15 @@ jobs:
       uses: actions/setup-python@v7
       with:
         python-version: 3.14
-    - name: 'Install ruff'
+    - name: 'Install ruff and pre-commit'
       run: |
         python3 --version
-        # Just install ruff to avoid heavy installation of
+        # Just install the linters to avoid heavy installation of
         # project dependencies (ffmpeg, oneapi, torch)
-        python3 -m pip install ruff
+        python3 -m pip install ruff pre-commit
     - name: 'Test with ruff'
       run: |
         ruff check -v
     - name: 'Check whitespace and file endings'
       run: |
-        python3 -m pip install pre-commit
         pre-commit run --all-files --show-diff-on-failure

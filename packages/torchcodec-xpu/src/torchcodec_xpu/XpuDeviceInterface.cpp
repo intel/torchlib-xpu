@@ -1,9 +1,11 @@
 // Copyright (c) 2025 Dmitry Rogozhkin.
 // Copyright (c) 2026 Intel Corporation. All Rights Reserved.
 
+#include <sys/stat.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <cstdio>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <filesystem>
@@ -44,6 +46,12 @@ const int MAX_XPU_GPUS = 128;
 const int MAX_CONTEXTS_PER_GPU_IN_CACHE = -1;
 PerGpuCache<AVBufferRef, Deleterp<AVBufferRef, void, av_buffer_unref>>
     g_cached_hw_device_ctxs(MAX_XPU_GPUS, MAX_CONTEXTS_PER_GPU_IN_CACHE);
+
+// Who closes the dma-buf fd handed to the Level Zero import, per device. See
+// importDmaBufAsUsm().
+enum class FdOwner { Unknown, Driver, Plugin };
+std::mutex g_fd_owner_mutex;
+std::unordered_map<ze_device_handle_t, FdOwner> g_fd_owners;
 
 inline bool to_bool(std::string str) {
     static const std::unordered_map<std::string, bool> bool_map = {
@@ -131,6 +139,103 @@ sycl::ext::oneapi::experimental::architecture getArchitecture(
   sycl::queue queue = c10::xpu::getCurrentXPUStream(device.index());
   return queue.get_device().get_info<
       sycl::ext::oneapi::experimental::info::device::architecture>();
+}
+
+// Returns the owner recorded for the device, or FdOwner::Unknown if it has not
+// been decided yet.
+inline FdOwner get_fd_owner(ze_device_handle_t zeDevice) {
+  std::lock_guard<std::mutex> lock(g_fd_owner_mutex);
+  auto it = g_fd_owners.find(zeDevice);
+  return it == g_fd_owners.end() ? FdOwner::Unknown : it->second;
+}
+
+// Records the owner for the device unless another thread already has.
+inline void set_fd_owner(ze_device_handle_t zeDevice, FdOwner owner) {
+  std::lock_guard<std::mutex> lock(g_fd_owner_mutex);
+  g_fd_owners.emplace(zeDevice, owner);
+}
+
+// Imports a dma-buf as device USM through Level Zero.
+// When this function returns, dmaBufFd will be closed. The caller should not
+// close dmaBufFd.
+//
+// Whether zeMemAllocDevice() closes the fd on success depends on the driver
+// version. See compute-runtime commit:
+// https://github.com/intel/compute-runtime/commit/03a714190160626520fbad6486365bfc8f0166e4
+//
+// With multiple decoder instances running on different threads, closing
+// an fd the driver already closed can break another thread which has
+// since reused the same fd number for a different, valid handle.
+//
+// To avoid this, the first successful import per device checks whether the fd
+// is still the same file (st_dev, st_ino) and records who closes it.
+// If the fd cannot be inspected, the driver is assumed to close it.
+// Threads importing concurrently before the owner is known each observe their
+// own fd, and the first recorded owner is kept.
+// A failed import never closes the fd, so it is closed here.
+ze_result_t importDmaBufAsUsm(
+    ze_context_handle_t zeCtx,
+    ze_device_handle_t zeDevice,
+    int dmaBufFd,
+    size_t size,
+    void** usmPtr) {
+  // Unknown until an import has succeeded on this device, which triggers
+  // observing the owner with fstat
+  FdOwner owner = get_fd_owner(zeDevice);
+
+  struct stat before;
+  const bool canObserve =
+      (owner == FdOwner::Unknown) && (fstat(dmaBufFd, &before) == 0);
+
+  ze_external_memory_import_fd_t import_fd_desc{};
+  import_fd_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
+  import_fd_desc.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
+  import_fd_desc.fd = dmaBufFd;
+
+  ze_device_mem_alloc_desc_t alloc_desc{};
+  alloc_desc.pNext = &import_fd_desc;
+  ze_result_t res =
+      zeMemAllocDevice(zeCtx, &alloc_desc, size, 0, zeDevice, usmPtr);
+
+  // Owner not known yet: check if the fd is still open
+  if (res == ZE_RESULT_SUCCESS && owner == FdOwner::Unknown) {
+    owner = FdOwner::Driver;
+    if (canObserve) {
+      struct stat after;
+      // fstat returns 0 if file is still open, or -1 if closed
+      // If file is still open AND points to same dma-buf as before, then we
+      //   assume it is an old driver which requires plugin to close the fd
+      if ((fstat(dmaBufFd, &after) == 0) && (after.st_dev == before.st_dev) &&
+          (after.st_ino == before.st_ino)) {
+        owner = FdOwner::Plugin;
+      }
+    }
+    set_fd_owner(zeDevice, owner);
+  }
+  // No driver closes the fd of a failed import, so close here
+  if (res != ZE_RESULT_SUCCESS || owner == FdOwner::Plugin) {
+    close(dmaBufFd);
+  }
+  if (res != ZE_RESULT_SUCCESS) {
+    return res;
+  }
+
+  // Make the allocation resident right after the import, which issues the
+  // DRM_XE_VM_BIND now rather than lazily at first submit. This works around
+  // a compute-runtime race: the driver gives an imported allocation an id
+  // before it publishes it. If another thread submits a kernel in between, the
+  // driver's residency scan skips that id and never revisits it, so the import
+  // is never bound. The first kernel using the pointer then page-faults and
+  // resets the queue (UR_RESULT_ERROR_DEVICE_LOST / OUT_OF_RESOURCES).
+  // Residency is looked up by pointer, so it does not depend on that scan.
+  // No zeContextEvictMemory() is needed: the Level Zero spec says memory is
+  // implicitly evicted when freed.
+  res = zeContextMakeMemoryResident(zeCtx, zeDevice, *usmPtr, size);
+  if (res != ZE_RESULT_SUCCESS) {
+    zeMemFree(zeCtx, *usmPtr);
+    *usmPtr = nullptr;
+  }
+  return res;
 }
 
 // Resolves the VAAPI render-node path this XPU device should open.
@@ -392,21 +497,17 @@ torch::stable::Tensor AVFrameToTensor(
       })
       .wait();
 
-  ze_external_memory_import_fd_t import_fd_desc{};
-  import_fd_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
-  import_fd_desc.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
-  import_fd_desc.fd = desc.objects[0].fd;
-
-  ze_device_mem_alloc_desc_t alloc_desc{};
-  alloc_desc.pNext = &import_fd_desc;
   void* usm_ptr = nullptr;
 
-  ze_result_t res = zeMemAllocDevice(
-      context->zeCtx, &alloc_desc, desc.objects[0].size, 0, ze_device, &usm_ptr);
+  // Takes ownership of the fd, which must not be closed here.
+  ze_result_t res = xpu::importDmaBufAsUsm(
+      context->zeCtx,
+      ze_device,
+      desc.objects[0].fd,
+      desc.objects[0].size,
+      &usm_ptr);
   TORCH_CHECK(
       res == ZE_RESULT_SUCCESS, "Failed to import fd=", desc.objects[0].fd);
-
-  close(desc.objects[0].fd);
 
   std::unique_ptr<DLManagedTensor> dl_dst = std::make_unique<DLManagedTensor>();
   int64_t* shape = (int64_t*)malloc(3*sizeof(int64_t));
@@ -617,26 +718,17 @@ bool XpuDeviceInterface::convert_av_frame_to_frame_output_with_sycl(
       })
       .wait();
 
-  ze_external_memory_import_fd_t import_fd_desc{};
-  import_fd_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
-  import_fd_desc.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
-  import_fd_desc.fd = desc.objects[0].fd;
-
-  ze_device_mem_alloc_desc_t alloc_desc{};
-  alloc_desc.pNext = &import_fd_desc;
   void* usm_ptr = nullptr;
 
-  ze_result_t res = zeMemAllocDevice(
+  // Takes ownership of the fd, which must not be closed here.
+  ze_result_t res = xpu::importDmaBufAsUsm(
       context->zeCtx,
-      &alloc_desc,
-      desc.objects[0].size,
-      0,
       ze_device,
+      desc.objects[0].fd,
+      desc.objects[0].size,
       &usm_ptr);
   TORCH_CHECK(
       res == ZE_RESULT_SUCCESS, "Failed to import fd=", desc.objects[0].fd);
-
-  close(desc.objects[0].fd);
 
   convertNV12ToRGB(
       queue,
@@ -908,19 +1000,12 @@ UniqueAVFrame XpuDeviceInterface::convert_tensor_to_av_frame_for_encoding_with_s
       })
       .wait();
 
-  ze_external_memory_import_fd_t import_fd_desc{};
-  import_fd_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
-  import_fd_desc.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
-  import_fd_desc.fd    = desc.objects[0].fd;
-
-  ze_device_mem_alloc_desc_t alloc_desc{};
-  alloc_desc.pNext = &import_fd_desc;
   void* usm_ptr = nullptr;
-  ze_result_t res = zeMemAllocDevice(
-      zeCtx, &alloc_desc, desc.objects[0].size, 0, zeDevice, &usm_ptr);
+  // Takes ownership of the fd, which must not be closed here.
+  ze_result_t res = xpu::importDmaBufAsUsm(
+      zeCtx, zeDevice, desc.objects[0].fd, desc.objects[0].size, &usm_ptr);
 
   if (res != ZE_RESULT_SUCCESS) {
-    close(desc.objects[0].fd);
     TORCH_CHECK(
         false,
         "zeMemAllocDevice failed importing encode surface fd=",
@@ -962,7 +1047,6 @@ UniqueAVFrame XpuDeviceInterface::convert_tensor_to_av_frame_for_encoding_with_s
       codec_context->colorspace);
 
   zeMemFree(zeCtx, usm_ptr);
-  close(desc.objects[0].fd);
 
   vaFrame->colorspace  = codec_context->colorspace;
   vaFrame->color_range = codec_context->color_range;

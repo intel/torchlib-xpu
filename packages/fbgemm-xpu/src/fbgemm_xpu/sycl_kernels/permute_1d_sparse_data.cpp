@@ -119,7 +119,7 @@ void Permute1DDataKernel<has_weight, offsets_t, indices_t, weights_t>::operator(
             const int64_t input_row = input_start + i;
             const int64_t output_row = output_start + i;
             for (int64_t col = 0; col < weight_columns_; ++col) {
-                permuted_weights_[output_row * weight_columns_ + col] = 
+                permuted_weights_[output_row * weight_columns_ + col] =
                     weights_[input_row * weight_columns_ + col];
             }
         }
@@ -269,7 +269,7 @@ permute_1D_sparse_data_xpu(
         // With weights - preserve dimensionality (1D or 2D)
         const auto weights_contig = weights->contiguous();
         const int64_t weight_columns = (weights->dim() == 2) ? weights->size(1) : 1;
-        
+
         // Create output tensor with same shape as input weights
         if (weights->dim() == 2) {
             permuted_weights = at::empty({permuted_indices_size, weight_columns}, weights->options());

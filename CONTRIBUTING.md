@@ -29,7 +29,10 @@ uv venv && uv pip install -e ".[test]" \
 
 ```
 ruff check
+pre-commit run --all-files
 ```
+
+The second command checks trailing whitespace and file endings in all files except patches and CSV baselines, and fixes what it finds. Run `pre-commit install` to have it fix files on every commit.
 
 ## How to test Intel® plugin for TorchCodec
 

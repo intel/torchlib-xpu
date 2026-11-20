@@ -380,7 +380,7 @@ torch::stable::Tensor AVFrameToTensor(
   TORCH_CHECK_EQ(frame->format, AV_PIX_FMT_VAAPI);
 
   sycl::queue queue = c10::xpu::getCurrentXPUStream(device.index());
-  TORCH_CHECK(queue.get_context() == sycl_context && queue.get_device() == sycl_device, 
+  TORCH_CHECK(queue.get_context() == sycl_context && queue.get_device() == sycl_device,
       "Current XPU stream does not match the provided SYCL context and device");
 
   VADRMPRIMESurfaceDescriptor desc{};
@@ -406,7 +406,6 @@ torch::stable::Tensor AVFrameToTensor(
   std::unique_ptr<xpuManagerCtx> context = std::make_unique<xpuManagerCtx>();
   context->syclContext = sycl_context;
   context->zeCtx = ze_context;
-  
   queue.wait();
 
   ze_external_memory_import_fd_t import_fd_desc{};
@@ -613,8 +612,8 @@ bool XpuDeviceInterface::convert_av_frame_to_frame_output_with_sycl(
   TORCH_CHECK_EQ(frame.format, AV_PIX_FMT_VAAPI);
 
   sycl::queue queue = c10::xpu::getCurrentXPUStream(device_.index());
-  TORCH_CHECK(queue.get_context() == *sycl_context_ && queue.get_device() == *sycl_device_, 
-  "Current XPU stream does not match SYCL context and device ");
+  TORCH_CHECK(queue.get_context() == *sycl_context_ && queue.get_device() == *sycl_device_,
+      "Current XPU stream does not match SYCL context and device ");
 
   VADRMPRIMESurfaceDescriptor desc{};
   VAStatus sts = vaExportSurfaceHandle(
@@ -916,7 +915,7 @@ UniqueAVFrame XpuDeviceInterface::convert_tensor_to_av_frame_for_encoding_with_s
   sycl::queue queue = c10::xpu::getCurrentXPUStream(device_.index());
   TORCH_CHECK(queue.get_context() == *sycl_context_ && queue.get_device() == *sycl_device_,
       "Current XPU stream does not match the provided SYCL context and device");
-  
+
   queue.wait();
 
   ze_external_memory_import_fd_t import_fd_desc{};
@@ -977,7 +976,7 @@ UniqueAVFrame XpuDeviceInterface::convert_tensor_to_av_frame_for_encoding_with_s
   if (!l0DriverOwnsImportedFd(queue.get_device())){
     std::fprintf(stderr, "[%s] Closing fd=%d\n", __func__, desc.objects[0].fd);
     close(desc.objects[0].fd);
-  }  
+  }
 
   vaFrame->colorspace  = codec_context->colorspace;
   vaFrame->color_range = codec_context->color_range;

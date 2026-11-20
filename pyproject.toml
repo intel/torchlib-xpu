@@ -12,6 +12,7 @@ dependencies = [ "torchcodec-xpu" ]
 
 [project.optional-dependencies]
 test = [
+    "pre-commit",
     "ruff",
     "torchcodec-xpu[test]"
 ]
@@ -34,5 +35,5 @@ torchcodec-xpu = { workspace = true }
 members = [ "packages/*" ]
 
 [tool.ruff.lint]
-    select = ["E", "F", "I"]
+    select = ["E", "F", "I", "W"]
     ignore = ["E501", "F403", "F405"]

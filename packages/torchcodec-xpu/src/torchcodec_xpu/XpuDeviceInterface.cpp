@@ -251,6 +251,14 @@ XpuDeviceInterface::XpuDeviceInterface(const StableDevice& device)
   torch::stable::Tensor dummyTensorForXpuInitialization = torch::stable::empty(
       {1}, kStableUInt8, std::nullopt, StableDevice(device));
 
+  sycl::queue queue = c10::xpu::getCurrentXPUStream(device_.index());
+
+  sycl_context_ = queue.get_context();
+  sycl_device_ = queue.get_device();
+
+  ze_context_ = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(*sycl_context_);
+  ze_device_ = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(*sycl_device_);
+
   auto arch = xpu::getArchitecture(device);
   if (!xpu::force_cpu_fallback()) {
     // Checking for devices which don't have HW media engines so we can skip
@@ -339,8 +347,21 @@ VADisplay getVaDisplayFromAV(AVFrame* avFrame) {
   return vactx->display;
 }
 
+bool l0DriverOwnsImportedFd(const sycl::device& dev){
+    const auto driver = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
+      dev.get_platform());
+    ze_api_version_t apiVersion{};
+    TORCH_CHECK(zeDriverGetApiVersion(driver, &apiVersion) == ZE_RESULT_SUCCESS,
+        "Failed to query Level Zero driver version");
+    std::fprintf(stderr, "Level Zero API version: %u.%u\n",
+        ZE_MAJOR_VERSION(apiVersion),
+        ZE_MINOR_VERSION(apiVersion));
+    return apiVersion >= ZE_MAKE_VERSION(1,15);
+  }
+
 struct xpuManagerCtx {
   UniqueAVFrame avFrame;
+  std::optional<sycl::context> syclContext;
   ze_context_handle_t zeCtx = nullptr;
 };
 
@@ -354,8 +375,16 @@ void deleter(DLManagedTensor* self) {
 
 torch::stable::Tensor AVFrameToTensor(
     const StableDevice& device,
-    const UniqueAVFrame& frame) {
+    const UniqueAVFrame& frame,
+    const sycl::context& sycl_context,
+    const sycl::device& sycl_device,
+    ze_context_handle_t ze_context,
+    ze_device_handle_t ze_device) {
   TORCH_CHECK_EQ(frame->format, AV_PIX_FMT_VAAPI);
+
+  sycl::queue queue = c10::xpu::getCurrentXPUStream(device.index());
+  TORCH_CHECK(queue.get_context() == sycl_context && queue.get_device() == sycl_device, 
+      "Current XPU stream does not match the provided SYCL context and device");
 
   VADRMPRIMESurfaceDescriptor desc{};
 
@@ -378,19 +407,10 @@ torch::stable::Tensor AVFrameToTensor(
       desc.layers[0].num_planes);
 
   std::unique_ptr<xpuManagerCtx> context = std::make_unique<xpuManagerCtx>();
-  ze_device_handle_t ze_device{};
-  sycl::queue queue = c10::xpu::getCurrentXPUStream(device.index());
-
-  queue
-      .submit([&](sycl::handler& cgh) {
-        cgh.host_task([&](const sycl::interop_handle& ih) {
-          context->zeCtx =
-              ih.get_native_context<sycl::backend::ext_oneapi_level_zero>();
-          ze_device =
-              ih.get_native_device<sycl::backend::ext_oneapi_level_zero>();
-        });
-      })
-      .wait();
+  context->syclContext = sycl_context;
+  context->zeCtx = ze_context;
+  
+  queue.wait();
 
   ze_external_memory_import_fd_t import_fd_desc{};
   import_fd_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
@@ -405,6 +425,11 @@ torch::stable::Tensor AVFrameToTensor(
       context->zeCtx, &alloc_desc, desc.objects[0].size, 0, ze_device, &usm_ptr);
   TORCH_CHECK(
       res == ZE_RESULT_SUCCESS, "Failed to import fd=", desc.objects[0].fd);
+
+  if (!l0DriverOwnsImportedFd(queue.get_device())){
+    std::fprintf(stderr, "[%s] Closing fd=%d\n", __func__, desc.objects[0].fd);
+    close(desc.objects[0].fd);
+  }
 
   std::unique_ptr<DLManagedTensor> dl_dst = std::make_unique<DLManagedTensor>();
   int64_t* shape = (int64_t*)malloc(3*sizeof(int64_t));
@@ -570,7 +595,8 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output_with_filter_graph(
 
   TORCH_CHECK_EQ(filteredAVFrame->format, AV_PIX_FMT_VAAPI);
 
-  torch::stable::Tensor dst_rgb4 = AVFrameToTensor(device_, filteredAVFrame);
+  torch::stable::Tensor dst_rgb4 = AVFrameToTensor(device_, filteredAVFrame, *sycl_context_,
+     *sycl_device_, ze_context_, ze_device_);
   torch::stable::copy_(dst, torch::stable::narrow(dst_rgb4, 2, 0, 3));
 }
 
@@ -588,6 +614,11 @@ bool XpuDeviceInterface::convert_av_frame_to_frame_output_with_sycl(
 #ifdef WITH_SYCL_KERNELS
   DEBUG_LOG(xpu::VERBOSE, "Using SYCL kernel backend for conversion");
   TORCH_CHECK_EQ(frame.format, AV_PIX_FMT_VAAPI);
+
+  sycl::queue queue = c10::xpu::getCurrentXPUStream(device_.index());
+  TORCH_CHECK(queue.get_context() == *sycl_context_ && queue.get_device() == *sycl_device_, 
+  "Current XPU stream does not match SYCL context and device ");
+
   VADRMPRIMESurfaceDescriptor desc{};
   VAStatus sts = vaExportSurfaceHandle(
       getVaDisplayFromAV(const_cast<AVFrame*>(&frame)),
@@ -601,19 +632,7 @@ bool XpuDeviceInterface::convert_av_frame_to_frame_output_with_sycl(
       vaErrorStr(sts));
 
   TORCH_CHECK(desc.num_objects == 1, "Expected 1 fd, got ", desc.num_objects);
-  std::unique_ptr<xpuManagerCtx> context = std::make_unique<xpuManagerCtx>();
-  ze_device_handle_t ze_device{};
-  sycl::queue queue = c10::xpu::getCurrentXPUStream(device_.index());
-  queue
-      .submit([&](sycl::handler& cgh) {
-        cgh.host_task([&](const sycl::interop_handle& ih) {
-          context->zeCtx =
-              ih.get_native_context<sycl::backend::ext_oneapi_level_zero>();
-          ze_device =
-              ih.get_native_device<sycl::backend::ext_oneapi_level_zero>();
-        });
-      })
-      .wait();
+  queue.wait();
 
   ze_external_memory_import_fd_t import_fd_desc{};
   import_fd_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
@@ -625,14 +644,19 @@ bool XpuDeviceInterface::convert_av_frame_to_frame_output_with_sycl(
   void* usm_ptr = nullptr;
 
   ze_result_t res = zeMemAllocDevice(
-      context->zeCtx,
+      ze_context_,
       &alloc_desc,
       desc.objects[0].size,
       0,
-      ze_device,
+      ze_device_,
       &usm_ptr);
   TORCH_CHECK(
       res == ZE_RESULT_SUCCESS, "Failed to import fd=", desc.objects[0].fd);
+
+  if (!l0DriverOwnsImportedFd(queue.get_device())){
+    std::fprintf(stderr, "[%s] Closing fd=%d\n", __func__, desc.objects[0].fd);
+    close(desc.objects[0].fd);
+  }
 
   convertNV12ToRGB(
       queue,
@@ -645,7 +669,7 @@ bool XpuDeviceInterface::convert_av_frame_to_frame_output_with_sycl(
       frame.color_range,
       frame.colorspace);
 
-  zeMemFree(context->zeCtx, usm_ptr);
+  zeMemFree(ze_context_, usm_ptr);
   converted = true;
 #endif
   return converted;
@@ -893,16 +917,10 @@ UniqueAVFrame XpuDeviceInterface::convert_tensor_to_av_frame_for_encoding_with_s
 
   // Get Level Zero context and device handles via SYCL interop.
   sycl::queue queue = c10::xpu::getCurrentXPUStream(device_.index());
-  ze_context_handle_t zeCtx  = nullptr;
-  ze_device_handle_t  zeDevice = nullptr;
-  queue
-      .submit([&](sycl::handler& cgh) {
-        cgh.host_task([&](const sycl::interop_handle& ih) {
-          zeCtx    = ih.get_native_context<sycl::backend::ext_oneapi_level_zero>();
-          zeDevice = ih.get_native_device<sycl::backend::ext_oneapi_level_zero>();
-        });
-      })
-      .wait();
+  TORCH_CHECK(queue.get_context() == *sycl_context_ && queue.get_device() == *sycl_device_,
+      "Current XPU stream does not match the provided SYCL context and device");
+  
+  queue.wait();
 
   ze_external_memory_import_fd_t import_fd_desc{};
   import_fd_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
@@ -910,10 +928,11 @@ UniqueAVFrame XpuDeviceInterface::convert_tensor_to_av_frame_for_encoding_with_s
   import_fd_desc.fd    = desc.objects[0].fd;
 
   ze_device_mem_alloc_desc_t alloc_desc{};
+  alloc_desc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
   alloc_desc.pNext = &import_fd_desc;
   void* usm_ptr = nullptr;
   ze_result_t res = zeMemAllocDevice(
-      zeCtx, &alloc_desc, desc.objects[0].size, 0, zeDevice, &usm_ptr);
+      ze_context_, &alloc_desc, desc.objects[0].size, 0, ze_device_, &usm_ptr);
 
   if (res != ZE_RESULT_SUCCESS) {
     close(desc.objects[0].fd);
@@ -957,7 +976,11 @@ UniqueAVFrame XpuDeviceInterface::convert_tensor_to_av_frame_for_encoding_with_s
       codec_context->color_range,
       codec_context->colorspace);
 
-  zeMemFree(zeCtx, usm_ptr);
+  zeMemFree(ze_context_, usm_ptr);
+  if (!l0DriverOwnsImportedFd(queue.get_device())){
+    std::fprintf(stderr, "[%s] Closing fd=%d\n", __func__, desc.objects[0].fd);
+    close(desc.objects[0].fd);
+  }  
 
   vaFrame->colorspace  = codec_context->colorspace;
   vaFrame->color_range = codec_context->color_range;

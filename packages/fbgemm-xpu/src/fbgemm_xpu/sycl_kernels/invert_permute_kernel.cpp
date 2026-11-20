@@ -37,24 +37,24 @@ at::Tensor invert_permute_forward_xpu(const at::Tensor& permute) {
     TORCH_INTERNAL_ASSERT(permute.device().type() == at::DeviceType::XPU,
                          "invert_permute_forward_xpu: input must be on XPU device");
     SYCL_DEVICE_GUARD(permute);
-    
+
     // Get input size
     const int64_t N = permute.size(0);
-    
+
     // Handle empty tensor
     if (N == 0) {
         return at::empty_like(permute);
     }
-    
+
     // Ensure input is contiguous for efficient memory access
     at::Tensor permute_contig = permute.contiguous();
-    
+
     // Allocate output tensor on the same device
     at::Tensor inversed_permute = at::empty_like(permute_contig);
-    
+
     // Get SYCL queue from current XPU stream
     sycl::queue& queue = c10::xpu::getCurrentXPUStream().queue();
-    
+
     // Kernel configuration
     // Work-group size (local size): number of work-items per work-group
     constexpr int threads = 256;
@@ -63,7 +63,7 @@ at::Tensor invert_permute_forward_xpu(const at::Tensor& permute) {
     const int blocks = (N + threads - 1) / threads;
     const size_t global_size = blocks * threads;
     const size_t local_size = threads;
-    
+
     // Dispatch over the index type (int32_t or int64_t), mirroring the
     // reference CUDA kernel invert_permute_kernel<index_t>.
     AT_DISPATCH_INDEX_TYPES(
@@ -81,16 +81,16 @@ at::Tensor invert_permute_forward_xpu(const at::Tensor& permute) {
                 );
             });
         });
-    
+
     // Note: We don't call queue.wait() here for asynchronous execution.
     // PyTorch's stream synchronization will handle proper ordering.
-    
+
     return inversed_permute;
 }
 
 /**
  * Register XPU implementation with PyTorch dispatch system
- * 
+ *
  * This binds the SYCL/XPU implementation to the operator schema defined in ops_registry.cpp
  * When an XPU tensor is passed to the operator, this implementation will be called.
  */

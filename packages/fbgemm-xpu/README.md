@@ -138,9 +138,18 @@ python -c "import fbgemm_xpu; print(fbgemm_xpu.__version__)"
 The jagged operators `jagged_to_padded_dense`, `jagged_2d_to_dense`,
 `dense_to_jagged` and `jagged_dense_elementwise_add_jagged_output` are
 benchmarked, forward and backward, with `python -m fbgemm_xpu.bench.jagged_sweep`.
-The upstream FBGEMM jagged tensor benchmark is also patched for XPU. The
-[baselines README](bench/baselines/README.md) covers how to reproduce the
-results, the sweep definition and the committed baselines. See also
+The upstream FBGEMM jagged tensor benchmark is also patched for XPU.
+
+The TBE training lookups, `dense_embedding_codegen_lookup_function` and
+`split_embedding_codegen_lookup_rowwise_adagrad_function_pt2`, are benchmarked
+forward and backward on the no-bag, unweighted path with
+`python -m fbgemm_xpu.bench.tbe_training`. It loads its workload shapes from
+the `TBEDataConfig` files in [bench/tbe/configs](bench/tbe/configs), and calls
+the operators directly, so it measures the operators rather than
+`SplitTableBatchedEmbeddingBagsCodegen`.
+
+The [baselines README](bench/baselines/README.md) covers how to reproduce the
+results, what each benchmark measures and the committed baselines. See also
 [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 ## Environment variables

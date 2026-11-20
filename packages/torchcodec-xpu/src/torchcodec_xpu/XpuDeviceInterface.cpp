@@ -318,7 +318,7 @@ void XpuDeviceInterface::initialize_video_decoding(
         av_stream,
         av_format_ctx,
         VideoStreamOptions(),
-        /*transforms=*/{}, 
+        /*transforms=*/{},
         /*resized_output_dims=*/std::nullopt);
   }
 }
@@ -327,7 +327,7 @@ std::string XpuDeviceInterface::get_details() {
   if (!has_decoded_frame_) {
     return "XpuDeviceInterface: Fallback status unknown (No frames decoded).";
   }
-  return std::string("XpuDeviceInterface: Using ") + 
+  return std::string("XpuDeviceInterface: Using ") +
       (using_cpu_fallback_ ? "CPU fallback. " : "XPU/VAAPI.");
 }
 
@@ -1050,8 +1050,8 @@ UniqueAVFrame XpuDeviceInterface::convert_tensor_to_av_frame_for_encoding_with_c
                    : SWS_CS_ITU601;
   sws_setColorspaceDetails(
       swsCtx,
-      sws_getCoefficients(cs), /*srcRange=*/1, 
-      sws_getCoefficients(cs), dstRange, 
+      sws_getCoefficients(cs), /*srcRange=*/1,
+      sws_getCoefficients(cs), dstRange,
       /*brightness=*/0, /*contrast=*/1 << 16, /*saturation=*/1 << 16);
 
   int sws_ret = sws_scale(

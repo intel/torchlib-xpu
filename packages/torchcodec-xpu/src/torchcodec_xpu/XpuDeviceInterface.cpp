@@ -353,9 +353,6 @@ bool l0DriverOwnsImportedFd(const sycl::device& dev){
     ze_api_version_t apiVersion{};
     TORCH_CHECK(zeDriverGetApiVersion(driver, &apiVersion) == ZE_RESULT_SUCCESS,
         "Failed to query Level Zero driver version");
-    std::fprintf(stderr, "Level Zero API version: %u.%u\n",
-        ZE_MAJOR_VERSION(apiVersion),
-        ZE_MINOR_VERSION(apiVersion));
     return apiVersion >= ZE_MAKE_VERSION(1,15);
   }
 

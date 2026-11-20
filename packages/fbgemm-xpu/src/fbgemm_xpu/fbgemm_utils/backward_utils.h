@@ -255,7 +255,7 @@ transpose_embedding_input(
     Tensor hash_size_cumsum, int64_t total_hash_size_bits, Tensor indices,
     Tensor offsets, bool nobag = false,
     const std::optional<Tensor>& vbe_b_t_map = std::optional<at::Tensor>(),
-    const int64_t info_B_num_bits = 26, const int64_t info_B_mask = 0x2FFFFFF,
+    const int64_t info_B_num_bits = 26, const int64_t info_B_mask = 0x3FFFFFF,
     const int64_t total_unique_indices = -1, const bool is_index_select = false,
     const std::optional<Tensor>& total_L_offsets = std::optional<at::Tensor>(),
     const int64_t fixed_L_per_warp = 0,

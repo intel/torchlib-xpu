@@ -36,6 +36,8 @@ static bool env_check_key(const std::string& key) {
     return std::stoi(value) == 1;
   } catch (const std::invalid_argument&) {
     return false;
+  } catch (const std::out_of_range&) {
+    return false;
   }
 }
 

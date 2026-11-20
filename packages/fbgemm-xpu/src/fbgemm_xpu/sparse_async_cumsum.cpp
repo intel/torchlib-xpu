@@ -67,10 +67,10 @@ at::Tensor asynchronous_exclusive_cumsum_xpu(const at::Tensor& t_in) {
   // Exclusive cumsum: input [a, b, c] → output [0, a, a+b]
   // This is computed as inclusive cumsum shifted right by one position
   at::Tensor t_out = at::empty_like(t_in);
-  
+
   // Set first element to 0
   t_out[0] = 0;
-  
+
   // If there's more than one element, compute inclusive cumsum of input[:-1]
   // and place it in output[1:]
   if (t_in.numel() > 1) {
@@ -78,7 +78,7 @@ at::Tensor asynchronous_exclusive_cumsum_xpu(const at::Tensor& t_in) {
     auto out_slice = t_out.slice(0, 1);                   // output[1:]
     at::cumsum_out(out_slice, in_slice, 0);
   }
-  
+
   return t_out;
 }
 

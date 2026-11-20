@@ -127,8 +127,7 @@ bool has_fp64(const StableDevice& device) {
 }
 
 sycl::ext::oneapi::experimental::architecture getArchitecture(
-    const StableDevice& device) {
-  sycl::queue queue = c10::xpu::getCurrentXPUStream(device.index());
+    const sycl::queue& queue) {
   return queue.get_device().get_info<
       sycl::ext::oneapi::experimental::info::device::architecture>();
 }
@@ -224,6 +223,8 @@ UniqueAVFrame allocNV12Frame(
 
 } // namespace xpu
 
+bool l0DriverOwnsImportedFd(const sycl::device& dev);
+
 int get_device_index(const StableDevice& device) {
   // PyTorch uses int8_t as its torch::DeviceIndex, but FFmpeg and XPU
   // libraries use int. So we use int, too.
@@ -253,13 +254,15 @@ XpuDeviceInterface::XpuDeviceInterface(const StableDevice& device)
 
   sycl::queue queue = c10::xpu::getCurrentXPUStream(device_.index());
 
+  l0_owns_fd_ = l0DriverOwnsImportedFd(queue.get_device());
+
   sycl_context_ = queue.get_context();
   sycl_device_ = queue.get_device();
 
   ze_context_ = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(*sycl_context_);
   ze_device_ = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(*sycl_device_);
 
-  auto arch = xpu::getArchitecture(device);
+  auto arch = xpu::getArchitecture(queue);
   if (!xpu::force_cpu_fallback()) {
     // Checking for devices which don't have HW media engines so we can skip
     // initialization of VAAPI context.
@@ -376,7 +379,8 @@ torch::stable::Tensor AVFrameToTensor(
     const sycl::context& sycl_context,
     const sycl::device& sycl_device,
     ze_context_handle_t ze_context,
-    ze_device_handle_t ze_device) {
+    ze_device_handle_t ze_device,
+    bool l0_owns_fd) {
   TORCH_CHECK_EQ(frame->format, AV_PIX_FMT_VAAPI);
 
   sycl::queue queue = c10::xpu::getCurrentXPUStream(device.index());
@@ -406,7 +410,6 @@ torch::stable::Tensor AVFrameToTensor(
   std::unique_ptr<xpuManagerCtx> context = std::make_unique<xpuManagerCtx>();
   context->syclContext = sycl_context;
   context->zeCtx = ze_context;
-  queue.wait();
 
   ze_external_memory_import_fd_t import_fd_desc{};
   import_fd_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
@@ -422,8 +425,7 @@ torch::stable::Tensor AVFrameToTensor(
   TORCH_CHECK(
       res == ZE_RESULT_SUCCESS, "Failed to import fd=", desc.objects[0].fd);
 
-  if (!l0DriverOwnsImportedFd(queue.get_device())){
-    std::fprintf(stderr, "[%s] Closing fd=%d\n", __func__, desc.objects[0].fd);
+  if (!l0_owns_fd){
     close(desc.objects[0].fd);
   }
 
@@ -592,7 +594,7 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output_with_filter_graph(
   TORCH_CHECK_EQ(filteredAVFrame->format, AV_PIX_FMT_VAAPI);
 
   torch::stable::Tensor dst_rgb4 = AVFrameToTensor(device_, filteredAVFrame, *sycl_context_,
-     *sycl_device_, ze_context_, ze_device_);
+     *sycl_device_, ze_context_, ze_device_, l0_owns_fd_);
   torch::stable::copy_(dst, torch::stable::narrow(dst_rgb4, 2, 0, 3));
 }
 
@@ -628,7 +630,6 @@ bool XpuDeviceInterface::convert_av_frame_to_frame_output_with_sycl(
       vaErrorStr(sts));
 
   TORCH_CHECK(desc.num_objects == 1, "Expected 1 fd, got ", desc.num_objects);
-  queue.wait();
 
   ze_external_memory_import_fd_t import_fd_desc{};
   import_fd_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
@@ -649,8 +650,7 @@ bool XpuDeviceInterface::convert_av_frame_to_frame_output_with_sycl(
   TORCH_CHECK(
       res == ZE_RESULT_SUCCESS, "Failed to import fd=", desc.objects[0].fd);
 
-  if (!l0DriverOwnsImportedFd(queue.get_device())){
-    std::fprintf(stderr, "[%s] Closing fd=%d\n", __func__, desc.objects[0].fd);
+  if (!l0_owns_fd_){
     close(desc.objects[0].fd);
   }
 
@@ -916,8 +916,6 @@ UniqueAVFrame XpuDeviceInterface::convert_tensor_to_av_frame_for_encoding_with_s
   TORCH_CHECK(queue.get_context() == *sycl_context_ && queue.get_device() == *sycl_device_,
       "Current XPU stream does not match the provided SYCL context and device");
 
-  queue.wait();
-
   ze_external_memory_import_fd_t import_fd_desc{};
   import_fd_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
   import_fd_desc.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
@@ -973,8 +971,7 @@ UniqueAVFrame XpuDeviceInterface::convert_tensor_to_av_frame_for_encoding_with_s
       codec_context->colorspace);
 
   zeMemFree(ze_context_, usm_ptr);
-  if (!l0DriverOwnsImportedFd(queue.get_device())){
-    std::fprintf(stderr, "[%s] Closing fd=%d\n", __func__, desc.objects[0].fd);
+  if (!l0_owns_fd_){
     close(desc.objects[0].fd);
   }
 

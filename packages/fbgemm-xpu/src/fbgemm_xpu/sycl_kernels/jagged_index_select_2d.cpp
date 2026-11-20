@@ -132,8 +132,9 @@ void JaggedIndexSelect2dKernel<index_t, offset_t, scalar_t>::operator()(
 //
 // DESCRIPTION:
 //   Validates inputs, allocates the dense output tensor, and dispatches the
-//   templated JaggedIndexSelect2dKernel over floating scalar types and index
-//   types. Launches at most 65535 work-groups of 256 items each.
+//   templated JaggedIndexSelect2dKernel over all standard scalar types plus
+//   Half and BFloat16, and over index types. Launches at most 65535
+//   work-groups of 256 items each.
 //
 ////////////////////////////////////////////////////////////////////////////////
 at::Tensor jagged_index_select_2d_forward_xpu(

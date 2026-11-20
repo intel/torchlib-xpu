@@ -98,7 +98,7 @@ class WeightRow {
     }
 
     //   //////////////////////////////////////////////////////////////////////////////
-    //   // Store regster variable of 4 elements (Vec4T<reg_t>) back into the
+    //   // Store register variable of 4 elements (Vec4T<reg_t>) back into the
     //   table
     //   // into the table row at element offset d
     //   //

@@ -150,7 +150,7 @@ namespace fbgemm_xpu {
 
         int64_t adjusted_D = D;
 
-        // Match output dtype to dev_weights dtype for consistency
+        // Allocate the output with the requested output_dtype on dev_weights' device
         output = at::empty({total_L, adjusted_D}, dev_weights.options().dtype(getScalarType(o_dtype))); // if nobag
 
         if (B == 0) {

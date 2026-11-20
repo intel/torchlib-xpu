@@ -105,8 +105,6 @@ namespace fbgemm_xpu {
 
 // Local complete-cumsum helper for XPU.
 // For input [a, b, c] returns [0, a, a+b, a+b+c] preserving the input dtype.
-// Avoids a hard dependency on an external asynchronous_complete_cumsum op,
-// which is not yet available in this minimal scaffolding.
 static at::Tensor local_complete_cumsum_xpu(const at::Tensor& t_in) {
     TORCH_CHECK(t_in.dtype() == at::kInt || t_in.dtype() == at::kLong,
         "block_bucketize_sparse_features: cumsum input must be int32 or int64");
@@ -1310,7 +1308,7 @@ _block_bucketize_sparse_features_xpu(
     auto offsets = fbgemm_xpu::local_complete_cumsum_xpu(lengths.contiguous());
     // offsets is size lengths_size+1; we slice to lengths_size for inclusive sums
     // The kernel uses offsets_data[b_t-1]..offsets_data[b_t] to get row bounds.
-    // asynchronous_complete_cumsum_xpu returns [0, c0, c0+c1, ...] (N+1 elements)
+    // local_complete_cumsum_xpu returns [0, c0, c0+c1, ...] (N+1 elements)
     // → offsets_data[b_t] = inclusive cumsum at b_t (i.e. end of row b_t)
     //   offsets_data[b_t-1] = start of row b_t
     // The kernel handles b_t==0 specially.

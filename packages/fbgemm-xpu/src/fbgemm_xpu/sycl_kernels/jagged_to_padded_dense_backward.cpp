@@ -47,8 +47,8 @@ at::Tensor jagged_to_padded_dense_backward_xpu(
         D_folded ? grad_padded_values.unsqueeze(-1) : grad_padded_values;
     const int32_t D = grad_padded_values_view.size(-1);
 
-    // Initialize with zeros so the output is zero for the portion truncated in
-    // forward. The kernel never writes those rows.
+    // Initialize with zeros. The kernel also writes zeros to the portion
+    // truncated in forward, but it writes nothing when grad_output is empty.
     auto grad_values =
         at::zeros_symint({total_L, D}, grad_padded_values.options());
 

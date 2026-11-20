@@ -267,8 +267,9 @@ private:
  *
  * Warp-per-segment decomposition: each warp handles one (batch, table) pair and
  * copies the indices of every ad in that segment. Handles both broadcast and
- * non-broadcast modes, and is the fallback for shapes the narrow kernels above
- * do not cover.
+ * non-broadcast modes. Like the CUDA host function, the XPU host function
+ * launches ReorderBatchedAdIndicesVecKernel instead, so this kernel is not
+ * launched.
  */
 template <typename Dtype, typename index_t = int32_t>
 class ReorderBatchedAdIndicesKernel {
@@ -324,9 +325,9 @@ private:
 //   Same decomposition as ReorderBatchedAdIndicesKernel, but the non-broadcast
 //   copy uses 2- or 4-wide vector loads/stores for segments longer than 64
 //   elements when the dtype is 4 or 8 bytes wide and both pointers carry the
-//   required alignment. This is the kernel the CUDA host function launches for
-//   the general path; the scalar variant above is kept as the fallback for
-//   dtypes the vector path does not cover.
+//   required alignment. This is the kernel the CUDA and XPU host functions
+//   launch for the general path. It falls back to scalar copies itself, so the
+//   scalar variant above is not launched.
 //
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -431,7 +432,7 @@ at::Tensor reorder_batched_ad_lengths_xpu(
 //   Host function that reorders the AD indices tensor to the table-major
 //   layout. Mirrors the CUDA dispatch logic: the narrow broadcast kernels are
 //   selected for `broadcast_indices && T <= 320 && B < 64`, otherwise the
-//   general ReorderBatchedAdIndicesKernel is launched.
+//   general ReorderBatchedAdIndicesVecKernel is launched.
 //
 ////////////////////////////////////////////////////////////////////////////////
 

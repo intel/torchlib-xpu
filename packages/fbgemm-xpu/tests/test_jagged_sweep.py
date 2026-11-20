@@ -4,7 +4,7 @@
 """Tests for the jagged-sweep benchmark of the XPU jagged operators."""
 
 import csv
-import subprocess  # nosec B404 - runs this repo's own module with fixed args
+import subprocess  # nosec B404
 import sys
 
 import pytest
@@ -69,7 +69,8 @@ def test_rejects_unknown_family(tmp_path):
 
 def test_runs_as_module(tmp_path):
     output = tmp_path / "smoke.csv"
-    result = subprocess.run(  # nosec B603 - sys.executable with a fixed arg list
+    # Runs this repo's own module with sys.executable and a fixed arg list.
+    result = subprocess.run(  # nosec B603
         [
             sys.executable,
             "-m",

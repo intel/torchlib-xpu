@@ -45,7 +45,7 @@ std::tuple<int32_t, uint32_t> get_info_B_num_bits_from_T(int32_t T, int32_t B) {
       info_B_num_bits,
       ". Expect max_B = ",
       info_B_mask,
-      "but got B ",
+      " but got B ",
       B);
   return {info_B_num_bits, info_B_mask};
 }

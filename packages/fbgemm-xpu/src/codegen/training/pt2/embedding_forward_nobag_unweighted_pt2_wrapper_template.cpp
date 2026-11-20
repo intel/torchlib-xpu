@@ -21,8 +21,8 @@
 //   CUDA Template: pt2/embedding_split_host_pt2_cuda_wrapper_template.cpp
 //
 // Codegen file output:
-//   gen_embedding_forward_{{ mdesc }}_nobag_unweighted_pt2_xpu_wrapper.sycl
-//   gen_embedding_backward_{{ mdesc }}_{{ optimizer }}_nobag_unweighted_pt2_xpu_wrapper.sycl
+//   gen_embedding_forward_split_unweighted_nobag_pt2_wrapper.cpp
+//   gen_embedding_backward_split_rowwise_adagrad_nobag_unweighted_pt2_xpu_wrapper.cpp
 //
 // DESCRIPTION:
 //   PT2 (PyTorch 2.0) compilation wrapper implementation for split embedding (nobag, unweighted).

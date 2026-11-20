@@ -137,7 +137,10 @@ inline uint32_t xpu_calc_xblock_count_base(int64_t num_items, int64_t threads_pe
   // but this is not portable.
   TORCH_CHECK(
       threads_per_block <= syclDeviceMaxWorkGroupSize(),
-      "Number of threads must be <=1024!");
+      "Number of threads must be <= ",
+      syclDeviceMaxWorkGroupSize(),
+      " (the device's maximum work-group size), got ",
+      threads_per_block);
   constexpr uint64_t max_blocks = 2147483647;
   const auto u_num_items = static_cast<uint64_t>(num_items);
   const auto u_threads = static_cast<uint64_t>(threads_per_block);

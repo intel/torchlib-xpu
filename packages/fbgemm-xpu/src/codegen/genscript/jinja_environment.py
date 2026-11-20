@@ -62,7 +62,7 @@ else:
 # Upper Limit of "max_embedding_dim (max_D)":
 # BT_block_size * sizeof(float) * 4 * kWarpSize * {{ kMaxVecsPerThread }}
 # needs to be smaller than the allocated shared memory size (2/3 of 96 KB
-# on V100 and 160 KB on A100.
+# on V100 and 160 KB on A100).
 # BT_block_size * 4 * 4 * 32 * (max_D // 128) <= 64 * 1024 (V100) or 96 * 1024 (A100)
 # Since BT_block_size >= 1, max_D <= 16K (V100) or 24K (A100).
 # Note that if we increase max_D, it will increase the compilation time significantly.
@@ -109,7 +109,7 @@ def generate_optimized_grad_sum_loop_access(
     - The indices of `grad_sum` when `kUseVecBlocking` is true and false are
       different. When `kUseVecBlocking` is true, `d_vec` is the index.
       Otherwise, `vec` is the index.
-    - When `kUseVecBlocking` is false, the number times that the for-loop is
+    - When `kUseVecBlocking` is false, the number of times that the for-loop is
       executed is known at compile time. Thus, we can add the `#pragma unroll`
       hint to tell the compiler to optimize the for-loop.
     """
@@ -170,7 +170,7 @@ def get_max_vecs_template_configs(
         configs.append((fixed_max_vecs_per_thread, warp_size, "true"))
 
     # Generate the cases where an entire embedding row can fit in the
-    # thread-local buffer (i.e., shared memory is not need for grad_sum)
+    # thread-local buffer (i.e., shared memory is not needed for grad_sum)
     if use_subwarp_shuffle:
         # Generate configs for sub-warp templates
         group_size = 8  # Smallest group size that TBE supports
@@ -332,7 +332,7 @@ def compute_global_weight_decay(is_global_weight_decay_kernel: bool) -> str:
     """
     For global weight decay kernel, compute the global weight decay value
     and update prev_iter to be current iteration
-    This is to used in both warp and cta kernels.
+    This is used in both warp and cta kernels.
     """
     if is_global_weight_decay_kernel:
         return """

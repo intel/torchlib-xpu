@@ -3,7 +3,7 @@ name = "torchlib-xpu"
 version = "0.5.0"
 description = "Intel® XPU Library for PyTorch* Ecosystem Projects"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [
     { name = "Dmitry Rogozhkin", email = "dmitry.v.rogozhkin@intel.com" },

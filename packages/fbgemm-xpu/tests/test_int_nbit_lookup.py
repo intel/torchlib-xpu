@@ -19,7 +19,7 @@ BOUNDS = "fbgemm::bounds_check_indices"
 @pytest.fixture
 def fbgemm():
     version = importlib.metadata.version("fbgemm-gpu-cpu")
-    assert version.split(".")[:2] == ["1", "9"], version  # nosec B101
+    assert version.split(".")[:2] == ["1", "10"], version  # nosec B101
     importlib.import_module("fbgemm_gpu")
     return importlib.import_module("fbgemm_gpu.split_table_batched_embeddings_ops_inference")
 
@@ -27,7 +27,7 @@ def fbgemm():
 @pytest.fixture
 def xpu(fbgemm):
     importlib.import_module("fbgemm_xpu")
-    assert torch.__version__.split("+")[0].startswith("2.14."), torch.__version__  # nosec B101
+    assert torch.__version__.split("+")[0].startswith("2.15."), torch.__version__  # nosec B101
     assert torch.xpu.is_available(), "XPU validation requires a real device; no skip/fallback"  # nosec B101
     for operator in (LOOKUP, BOUNDS):
         assert torch._C._dispatch_has_kernel_for_dispatch_key(operator, "XPU"), operator  # nosec B101

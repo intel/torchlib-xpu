@@ -335,9 +335,10 @@ still use L.
   have no XPU kernels.
 - Optimisers other than rowwise Adagrad: they have no XPU split lookup.
 - The module path, `SplitTableBatchedEmbeddingBagsCodegen` and
-  `DenseTableBatchedEmbeddingBagsCodegen`: pristine FBGEMM 1.9.0 has no
-  `ComputeDevice.XPU`, and they hard-code CUDA, MTIA or CPU. Adding XPU there
-  is a separate upstream change.
+  `DenseTableBatchedEmbeddingBagsCodegen`: pristine FBGEMM 1.9.0, which these
+  baselines use, has no `ComputeDevice.XPU`, and they hard-code CUDA, MTIA or
+  CPU. FBGEMM 1.10 adds `ComputeDevice.XPU`, which only the split module
+  takes.
 - Upstream's `tbe_training_benchmark.py` is not patched. It is not in the
   `fbgemm-gpu` wheel, its helpers are imported from the installed wheel, so
   patching the checkout would change nothing that runs, and it builds the

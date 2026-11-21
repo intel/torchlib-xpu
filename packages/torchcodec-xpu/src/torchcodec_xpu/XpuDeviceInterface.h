@@ -53,11 +53,12 @@ class XpuDeviceInterface : public DeviceInterface {
       AVCodecContext* codec_context) override;
 
  private:
+  std::optional<sycl::queue> queue_;
   std::optional<sycl::context> sycl_context_;
   std::optional<sycl::device> sycl_device_;
   ze_context_handle_t ze_context_ = nullptr;
   ze_device_handle_t ze_device_ = nullptr;
-  bool l0_owns_fd_ = false;
+  
 
   // CPU fallback interface. Used when frames cannot be handled on XPU
   std::unique_ptr<DeviceInterface> cpu_interface_;
@@ -67,6 +68,7 @@ class XpuDeviceInterface : public DeviceInterface {
   bool has_fp64_;
   bool has_decoded_frame_ = false;
   bool using_cpu_fallback_ = false;
+  bool l0_owns_fd_ = false;
 
   UniqueAVBufferRef ctx_;
 
@@ -77,6 +79,8 @@ class XpuDeviceInterface : public DeviceInterface {
   FiltersConfig prev_filters_config_;
 
   void ensure_cpu_interface();
+
+  torch::stable::Tensor AVFrameToTensor(const UniqueAVFrame& frame);
 
   // Optimized conversion. Return value indicates if conversion was
   // successfull.

@@ -126,6 +126,15 @@ bool has_fp64(const StableDevice& device) {
   return syclDevice.has(sycl::aspect::fp64);
 }
 
+bool l0DriverOwnsImportedFd(const sycl::device& dev){
+    const auto driver = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
+      dev.get_platform());
+    ze_api_version_t apiVersion{};
+    TORCH_CHECK(zeDriverGetApiVersion(driver, &apiVersion) == ZE_RESULT_SUCCESS,
+        "Failed to query Level Zero driver version");
+    return apiVersion >= ZE_MAKE_VERSION(1,15);
+  }
+
 sycl::ext::oneapi::experimental::architecture getArchitecture(
     const sycl::queue& queue) {
   return queue.get_device().get_info<
@@ -223,8 +232,6 @@ UniqueAVFrame allocNV12Frame(
 
 } // namespace xpu
 
-bool l0DriverOwnsImportedFd(const sycl::device& dev);
-
 int get_device_index(const StableDevice& device) {
   // PyTorch uses int8_t as its torch::DeviceIndex, but FFmpeg and XPU
   // libraries use int. So we use int, too.
@@ -253,11 +260,12 @@ XpuDeviceInterface::XpuDeviceInterface(const StableDevice& device)
       {1}, kStableUInt8, std::nullopt, StableDevice(device));
 
   sycl::queue queue = c10::xpu::getCurrentXPUStream(device_.index());
-
-  l0_owns_fd_ = l0DriverOwnsImportedFd(queue.get_device());
+  queue_ = queue;
 
   sycl_context_ = queue.get_context();
   sycl_device_ = queue.get_device();
+
+  l0_owns_fd_ = xpu::l0DriverOwnsImportedFd(*sycl_device_);
 
   ze_context_ = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(*sycl_context_);
   ze_device_ = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(*sycl_device_);
@@ -350,15 +358,6 @@ VADisplay getVaDisplayFromAV(AVFrame* avFrame) {
   return vactx->display;
 }
 
-bool l0DriverOwnsImportedFd(const sycl::device& dev){
-    const auto driver = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
-      dev.get_platform());
-    ze_api_version_t apiVersion{};
-    TORCH_CHECK(zeDriverGetApiVersion(driver, &apiVersion) == ZE_RESULT_SUCCESS,
-        "Failed to query Level Zero driver version");
-    return apiVersion >= ZE_MAKE_VERSION(1,15);
-  }
-
 struct xpuManagerCtx {
   UniqueAVFrame avFrame;
   std::optional<sycl::context> syclContext;
@@ -373,19 +372,9 @@ void deleter(DLManagedTensor* self) {
   free(self->dl_tensor.strides);
 }
 
-torch::stable::Tensor AVFrameToTensor(
-    const StableDevice& device,
-    const UniqueAVFrame& frame,
-    const sycl::context& sycl_context,
-    const sycl::device& sycl_device,
-    ze_context_handle_t ze_context,
-    ze_device_handle_t ze_device,
-    bool l0_owns_fd) {
+torch::stable::Tensor XpuDeviceInterface:: AVFrameToTensor(
+    const UniqueAVFrame& frame) {
   TORCH_CHECK_EQ(frame->format, AV_PIX_FMT_VAAPI);
-
-  sycl::queue queue = c10::xpu::getCurrentXPUStream(device.index());
-  TORCH_CHECK(queue.get_context() == sycl_context && queue.get_device() == sycl_device,
-      "Current XPU stream does not match the provided SYCL context and device");
 
   VADRMPRIMESurfaceDescriptor desc{};
 
@@ -408,8 +397,8 @@ torch::stable::Tensor AVFrameToTensor(
       desc.layers[0].num_planes);
 
   std::unique_ptr<xpuManagerCtx> context = std::make_unique<xpuManagerCtx>();
-  context->syclContext = sycl_context;
-  context->zeCtx = ze_context;
+  context->syclContext = *sycl_context_;
+  context->zeCtx = ze_context_;
 
   ze_external_memory_import_fd_t import_fd_desc{};
   import_fd_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
@@ -421,11 +410,11 @@ torch::stable::Tensor AVFrameToTensor(
   void* usm_ptr = nullptr;
 
   ze_result_t res = zeMemAllocDevice(
-      context->zeCtx, &alloc_desc, desc.objects[0].size, 0, ze_device, &usm_ptr);
+      context->zeCtx, &alloc_desc, desc.objects[0].size, 0, ze_device_, &usm_ptr);
   TORCH_CHECK(
       res == ZE_RESULT_SUCCESS, "Failed to import fd=", desc.objects[0].fd);
 
-  if (!l0_owns_fd){
+  if (!l0_owns_fd_){
     close(desc.objects[0].fd);
   }
 
@@ -449,7 +438,7 @@ torch::stable::Tensor AVFrameToTensor(
   dl_dst->deleter = deleter;
   dl_dst->dl_tensor.data = usm_ptr;
   dl_dst->dl_tensor.device.device_type = kDLOneAPI;
-  dl_dst->dl_tensor.device.device_id = device.index();
+  dl_dst->dl_tensor.device.device_id = device_.index();
   dl_dst->dl_tensor.ndim = 3;
   dl_dst->dl_tensor.dtype.code = kDLUInt;
   dl_dst->dl_tensor.dtype.bits = 8;
@@ -593,8 +582,7 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output_with_filter_graph(
 
   TORCH_CHECK_EQ(filteredAVFrame->format, AV_PIX_FMT_VAAPI);
 
-  torch::stable::Tensor dst_rgb4 = AVFrameToTensor(device_, filteredAVFrame, *sycl_context_,
-     *sycl_device_, ze_context_, ze_device_, l0_owns_fd_);
+  torch::stable::Tensor dst_rgb4 = AVFrameToTensor(filteredAVFrame);
   torch::stable::copy_(dst, torch::stable::narrow(dst_rgb4, 2, 0, 3));
 }
 
@@ -612,10 +600,6 @@ bool XpuDeviceInterface::convert_av_frame_to_frame_output_with_sycl(
 #ifdef WITH_SYCL_KERNELS
   DEBUG_LOG(xpu::VERBOSE, "Using SYCL kernel backend for conversion");
   TORCH_CHECK_EQ(frame.format, AV_PIX_FMT_VAAPI);
-
-  sycl::queue queue = c10::xpu::getCurrentXPUStream(device_.index());
-  TORCH_CHECK(queue.get_context() == *sycl_context_ && queue.get_device() == *sycl_device_,
-      "Current XPU stream does not match SYCL context and device ");
 
   VADRMPRIMESurfaceDescriptor desc{};
   VAStatus sts = vaExportSurfaceHandle(
@@ -655,7 +639,7 @@ bool XpuDeviceInterface::convert_av_frame_to_frame_output_with_sycl(
   }
 
   convertNV12ToRGB(
-      queue,
+      *queue_,
       (uint8_t*)usm_ptr + desc.layers[0].offset[0],
       (uint8_t*)usm_ptr + desc.layers[1].offset[0],
       (uint8_t*)dst.data_ptr(),
@@ -911,11 +895,6 @@ UniqueAVFrame XpuDeviceInterface::convert_tensor_to_av_frame_for_encoding_with_s
       "Unsupported NV12 export layout: num_layers=", desc.num_layers,
       " layers[0].num_planes=", desc.layers[0].num_planes);
 
-  // Get Level Zero context and device handles via SYCL interop.
-  sycl::queue queue = c10::xpu::getCurrentXPUStream(device_.index());
-  TORCH_CHECK(queue.get_context() == *sycl_context_ && queue.get_device() == *sycl_device_,
-      "Current XPU stream does not match the provided SYCL context and device");
-
   ze_external_memory_import_fd_t import_fd_desc{};
   import_fd_desc.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
   import_fd_desc.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
@@ -955,7 +934,7 @@ UniqueAVFrame XpuDeviceInterface::convert_tensor_to_av_frame_for_encoding_with_s
   // drm_format_modifier != 0 means tiled (e.g. Intel Tile-Y on BMG/Gen12+).
   const bool is_tiled = (desc.objects[0].drm_format_modifier != 0);
   convertRGBToNV12(
-      queue,
+      *queue_,
       static_cast<const uint8_t*>(tensor.data_ptr()),
       tensor.strides()[0],   // ch_stride
       tensor.strides()[1],   // row_stride

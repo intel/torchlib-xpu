@@ -58,7 +58,6 @@ class XpuDeviceInterface : public DeviceInterface {
   std::optional<sycl::device> sycl_device_;
   ze_context_handle_t ze_context_ = nullptr;
   ze_device_handle_t ze_device_ = nullptr;
-  
 
   // CPU fallback interface. Used when frames cannot be handled on XPU
   std::unique_ptr<DeviceInterface> cpu_interface_;

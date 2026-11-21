@@ -1,4 +1,4 @@
-From fb23df23720eac63a46e06f73a2950daef832e3b Mon Sep 17 00:00:00 2001
+From 881bd696e41bdb8dabc1a88e5590f6b055dbf060 Mon Sep 17 00:00:00 2001
 From: Alberto Gallegos <alberto.gallegos.muro@intel.com>
 Date: Thu, 9 Jul 2026 18:28:28 +0000
 Subject: [PATCH] Add XPU support to FBGEMM sparse ops and jagged tensor tests
@@ -72,8 +72,10 @@ different serial kernel.
 
 BlockBucketizeChunkedKernelTest repeats every BlockBucketizeTest case with
 FBGEMM_XPU_BLOCK_BUCKETIZE_KERNEL=chunked. fbgemm_xpu's automatic choice
-takes its chunked kernel only for a few long rows, which none of these
-tests builds.
+takes its chunked kernel only for a few long rows; of these tests only
+test_block_bucketize_long_sequence_warp_matches_cpu builds them. That test
+comes with FBGEMM 1.10 and runs on the current accelerator like the other
+BlockBucketizeTest cases.
 
 Signed-off-by: Alberto Gallegos <alberto.gallegos.muro@intel.com>
 Signed-off-by: Felipe Leza Alvarez <felipe.leza.alvarez@intel.com>
@@ -82,28 +84,28 @@ Signed-off-by: mkrze <mateusz.krzemieniewski@intel.com>
 Co-authored-by: Felipe Leza Alvarez <felipe.leza.alvarez@intel.com>
 ---
  fbgemm_gpu/test/jagged/1d_to_dense_test.py    |  29 ++-
- fbgemm_gpu/test/jagged/2d_to_dense_test.py    |  39 +++-
+ fbgemm_gpu/test/jagged/2d_to_dense_test.py    |  39 ++-
  fbgemm_gpu/test/jagged/common.py              |   1 +
  .../test/jagged/dense_to_jagged_test.py       |  19 +-
  .../test/jagged/elementwise_binary_test.py    |  14 +-
  .../jagged/expand_into_jagged_permute_test.py |  29 ++-
  .../jagged/jagged_index_select_2d_test.py     |  28 ++-
  .../test/merge_pooled_embeddings_test.py      |  31 ++-
- .../test/sparse/block_bucketize_test.py       | 218 +++++++++++-------
+ .../test/sparse/block_bucketize_test.py       | 224 +++++++++++-------
  fbgemm_gpu/test/sparse/cumsum_test.py         |   4 +
  fbgemm_gpu/test/sparse/misc_ops_test.py       |  24 +-
  .../sparse/permute_sparse_features_test.py    |  15 +-
- .../test/sparse/reorder_batched_test.py       |  47 ++--
+ .../test/sparse/reorder_batched_test.py       |  45 ++--
  .../tbe/utils/generate_vbe_metadata_test.py   |  23 +-
  .../tbe/utils/split_embeddings_utils_test.py  |  33 ++-
- fbgemm_gpu/test/test_utils.py                 |  52 ++++-
- 16 files changed, 426 insertions(+), 180 deletions(-)
+ fbgemm_gpu/test/test_utils.py                 |  52 +++-
+ 16 files changed, 428 insertions(+), 182 deletions(-)
 
 diff --git a/fbgemm_gpu/test/jagged/1d_to_dense_test.py b/fbgemm_gpu/test/jagged/1d_to_dense_test.py
-index 387ee1010..9ceb293fb 100644
+index 7b734ab2..1bcdc4e8 100644
 --- a/fbgemm_gpu/test/jagged/1d_to_dense_test.py
 +++ b/fbgemm_gpu/test/jagged/1d_to_dense_test.py
-@@ -21,15 +21,19 @@ from .common import additional_decorators, open_source, var_list_to_coo_1d
+@@ -21,8 +21,10 @@ from .common import additional_decorators, open_source, var_list_to_coo_1d
  if open_source:
      # pyre-ignore[21]
      from test_utils import (
@@ -112,8 +114,10 @@ index 387ee1010..9ceb293fb 100644
          cpu_and_maybe_gpu,
 -        gpu_unavailable,
 +        current_accelerator,
+         MI350_ARCH,
          optests,
-         symint_vector_unsupported,
+         running_on_rocm_arch,
+@@ -30,8 +32,10 @@ if open_source:
      )
  else:
      from fbgemm_gpu.test.test_utils import (
@@ -122,10 +126,10 @@ index 387ee1010..9ceb293fb 100644
          cpu_and_maybe_gpu,
 -        gpu_unavailable,
 +        current_accelerator,
+         MI350_ARCH,
          optests,
-         symint_vector_unsupported,
-     )
-@@ -87,12 +91,12 @@ class Jagged1DToDenseTest(unittest.TestCase):
+         running_on_rocm_arch,
+@@ -91,12 +95,12 @@ class Jagged1DToDenseTest(unittest.TestCase):
          )
          torch.testing.assert_close(ref_output_values, output_values)
  
@@ -142,7 +146,7 @@ index 387ee1010..9ceb293fb 100644
              output_values = torch.ops.fbgemm.jagged_1d_to_dense(
                  values=values,
                  offsets=offsets,
-@@ -119,12 +123,12 @@ class Jagged1DToDenseTest(unittest.TestCase):
+@@ -123,12 +127,12 @@ class Jagged1DToDenseTest(unittest.TestCase):
          )
          torch.testing.assert_close(ref_output, output)
  
@@ -159,7 +163,7 @@ index 387ee1010..9ceb293fb 100644
              output = torch.ops.fbgemm.jagged_1d_to_dense(
                  values=values,
                  offsets=offsets,
-@@ -194,7 +198,7 @@ class Jagged1DToDenseTest(unittest.TestCase):
+@@ -198,7 +202,7 @@ class Jagged1DToDenseTest(unittest.TestCase):
          )
          torch.testing.assert_close(ref_output_values, output_values)
  
@@ -168,7 +172,7 @@ index 387ee1010..9ceb293fb 100644
      @settings(
          verbosity=Verbosity.verbose,
          max_examples=20,
-@@ -207,6 +211,9 @@ class Jagged1DToDenseTest(unittest.TestCase):
+@@ -211,6 +215,9 @@ class Jagged1DToDenseTest(unittest.TestCase):
          padding_value=st.integers(min_value=-100000, max_value=100000),
          device=cpu_and_maybe_gpu(),
      )
@@ -179,7 +183,7 @@ index 387ee1010..9ceb293fb 100644
          self,
          T: int,
 diff --git a/fbgemm_gpu/test/jagged/2d_to_dense_test.py b/fbgemm_gpu/test/jagged/2d_to_dense_test.py
-index 3370a37fd..1db983441 100644
+index 3370a37f..1db98344 100644
 --- a/fbgemm_gpu/test/jagged/2d_to_dense_test.py
 +++ b/fbgemm_gpu/test/jagged/2d_to_dense_test.py
 @@ -20,9 +20,21 @@ from .common import additional_decorators, open_source, var_list_to_coo
@@ -269,7 +273,7 @@ index 3370a37fd..1db983441 100644
          self,
          T: int,
 diff --git a/fbgemm_gpu/test/jagged/common.py b/fbgemm_gpu/test/jagged/common.py
-index 9a520a843..7fa183e02 100644
+index 9a520a84..7fa183e0 100644
 --- a/fbgemm_gpu/test/jagged/common.py
 +++ b/fbgemm_gpu/test/jagged/common.py
 @@ -14,6 +14,7 @@ from typing import Any
@@ -281,7 +285,7 @@ index 9a520a843..7fa183e02 100644
  import numpy.typing as npt
  import torch
 diff --git a/fbgemm_gpu/test/jagged/dense_to_jagged_test.py b/fbgemm_gpu/test/jagged/dense_to_jagged_test.py
-index ce42f1c40..4e140e3a9 100644
+index ce42f1c4..4e140e3a 100644
 --- a/fbgemm_gpu/test/jagged/dense_to_jagged_test.py
 +++ b/fbgemm_gpu/test/jagged/dense_to_jagged_test.py
 @@ -19,12 +19,17 @@ from .common import additional_decorators, generate_jagged_tensor, open_source
@@ -335,7 +339,7 @@ index ce42f1c40..4e140e3a9 100644
          """Regression: int32 overflow in dense_to_jagged backward at
          B * max_L * D > INT_MAX, even when B * max_L itself fits in int32.
 diff --git a/fbgemm_gpu/test/jagged/elementwise_binary_test.py b/fbgemm_gpu/test/jagged/elementwise_binary_test.py
-index 44541b921..76012b75b 100644
+index 44541b92..76012b75 100644
 --- a/fbgemm_gpu/test/jagged/elementwise_binary_test.py
 +++ b/fbgemm_gpu/test/jagged/elementwise_binary_test.py
 @@ -26,17 +26,17 @@ from .common import (
@@ -381,7 +385,7 @@ index 44541b921..76012b75b 100644
          "the 32-GiB grid-overflow regression is covered by the direct GPU test"
      )
 diff --git a/fbgemm_gpu/test/jagged/expand_into_jagged_permute_test.py b/fbgemm_gpu/test/jagged/expand_into_jagged_permute_test.py
-index e3eb1b52c..2259a6b18 100644
+index e3eb1b52..2259a6b1 100644
 --- a/fbgemm_gpu/test/jagged/expand_into_jagged_permute_test.py
 +++ b/fbgemm_gpu/test/jagged/expand_into_jagged_permute_test.py
 @@ -19,10 +19,14 @@ from hypothesis import given, settings, Verbosity
@@ -441,7 +445,7 @@ index e3eb1b52c..2259a6b18 100644
  
      @unittest.skipIf(*gpu_unavailable)
 diff --git a/fbgemm_gpu/test/jagged/jagged_index_select_2d_test.py b/fbgemm_gpu/test/jagged/jagged_index_select_2d_test.py
-index 2e28863ad..4cd048eb0 100644
+index 2e28863a..4cd048eb 100644
 --- a/fbgemm_gpu/test/jagged/jagged_index_select_2d_test.py
 +++ b/fbgemm_gpu/test/jagged/jagged_index_select_2d_test.py
 @@ -19,9 +19,18 @@ from .common import additional_decorators, open_source
@@ -516,10 +520,10 @@ index 2e28863ad..4cd048eb0 100644
          lengths = torch.randint(
              low=0,
 diff --git a/fbgemm_gpu/test/merge_pooled_embeddings_test.py b/fbgemm_gpu/test/merge_pooled_embeddings_test.py
-index f0db0e65b..4326f4d83 100644
+index c1e96324..c2d3a283 100644
 --- a/fbgemm_gpu/test/merge_pooled_embeddings_test.py
 +++ b/fbgemm_gpu/test/merge_pooled_embeddings_test.py
-@@ -21,14 +21,22 @@ open_source: bool = getattr(fbgemm_gpu, "open_source", False)
+@@ -22,14 +22,22 @@ open_source: bool = getattr(fbgemm_gpu, "open_source", False)
  
  if open_source:
      # pyre-ignore[21]
@@ -544,7 +548,7 @@ index f0db0e65b..4326f4d83 100644
  
  
  def make_pitched_tensor(
-@@ -53,11 +61,11 @@ def make_pitched_tensor(
+@@ -104,11 +112,11 @@ def empty_padded_like(value: torch.Tensor) -> torch.Tensor:
  
  
  # @unittest.skipIf(open_source, "Not supported in open source yet")
@@ -557,7 +561,7 @@ index f0db0e65b..4326f4d83 100644
      @given(
          num_ads=st.integers(min_value=1, max_value=10),
          embedding_dimension=st.integers(min_value=1, max_value=32),
-@@ -126,9 +134,10 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
+@@ -180,9 +188,10 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
          torch.testing.assert_close(output_ref, output_cpu)
  
      # pyre-fixme[56]: Pyre was not able to infer the type of argument
@@ -569,7 +573,7 @@ index f0db0e65b..4326f4d83 100644
          r=st.randoms(use_true_random=False),
          use_pitched=st.booleans(),
      )
-@@ -142,8 +151,9 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
+@@ -196,8 +205,9 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
          r,
          use_pitched: bool,
      ) -> None:
@@ -581,7 +585,7 @@ index f0db0e65b..4326f4d83 100644
              if use_pitched:
                  inputs = [
                      make_pitched_tensor(10, 20, torch.float32, "cpu", alignment=256)
-@@ -153,13 +163,15 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
+@@ -207,13 +217,15 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
                  inputs = [torch.randn(10, 20) for _ in range(num_inputs)]
  
              cuda_inputs = [
@@ -598,7 +602,7 @@ index f0db0e65b..4326f4d83 100644
      def test_merge_pooled_embeddings_gpu_to_cpu(self) -> None:
          dst_device = torch.device("cpu")
          inputs = [torch.randn(10, 20) for _ in range(4)]
-@@ -174,6 +186,7 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
+@@ -228,6 +240,7 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
          torch.testing.assert_close(output, ref_output)
  
      # pyre-fixme[56]: Pyre was not able to infer the type of argument
@@ -606,7 +610,7 @@ index f0db0e65b..4326f4d83 100644
      @given(
          num_inputs=st.integers(min_value=1, max_value=8),
          num_gpus=st.integers(min_value=1, max_value=torch.cuda.device_count()),
-@@ -213,6 +226,7 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
+@@ -267,6 +280,7 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
              )
          torch.testing.assert_close(output, ref_output)
  
@@ -614,7 +618,7 @@ index f0db0e65b..4326f4d83 100644
      def test_merge_pooled_embeddings_cpu_with_different_target_device(self) -> None:
          uncat_size = 2
          pooled_embeddings = [torch.ones(uncat_size, 4), torch.ones(uncat_size, 8)]
-@@ -228,6 +242,7 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
+@@ -282,6 +296,7 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
      # pyre-fixme[56]: Pyre was not able to infer the type of argument
      #  `hypothesis.strategies.integers($parameter$min_value = 1, $parameter$max_value =
      #  10)` to decorator factory `hypothesis.given`.
@@ -622,7 +626,7 @@ index f0db0e65b..4326f4d83 100644
      @given(
          num_inputs=st.integers(min_value=1, max_value=10),
          num_gpus=st.integers(min_value=1, max_value=torch.cuda.device_count()),
-@@ -256,6 +271,7 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
+@@ -310,6 +325,7 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
                  cuda_output.cpu(), torch.stack(inputs).sum(dim=0)
              )
  
@@ -630,7 +634,7 @@ index f0db0e65b..4326f4d83 100644
      def test_merge_pooled_embeddings_meta(self) -> None:
          """
          Test that merge_pooled_embeddings works with meta tensor and
-@@ -286,6 +302,7 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
+@@ -340,6 +356,7 @@ class MergePooledEmbeddingsTest(unittest.TestCase):
  
          assert output_meta.shape == output_cpu.shape
  
@@ -639,7 +643,7 @@ index f0db0e65b..4326f4d83 100644
          uncat_size = 2
          pooled_embeddings = [
 diff --git a/fbgemm_gpu/test/sparse/block_bucketize_test.py b/fbgemm_gpu/test/sparse/block_bucketize_test.py
-index e7c9837bf..80229c8d1 100644
+index 72c27e2c..1d4273e5 100644
 --- a/fbgemm_gpu/test/sparse/block_bucketize_test.py
 +++ b/fbgemm_gpu/test/sparse/block_bucketize_test.py
 @@ -9,8 +9,10 @@
@@ -688,7 +692,29 @@ index e7c9837bf..80229c8d1 100644
  
  def unbucketize_indices_value(
      bucketized_indices: torch.Tensor,
-@@ -79,7 +97,7 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -77,7 +95,7 @@ class BlockBucketizeTest(unittest.TestCase):
+                     self.assertAlmostEqual(left, right)
+         return
+ 
+-    @unittest.skipIf(*gpu_unavailable)
++    @unittest.skipIf(*accelerator_unavailable)
+     def test_block_bucketize_long_sequence_warp_matches_cpu(self) -> None:
+         """Exercise the long-sequence warp path and require stable CPU parity."""
+         lengths = torch.tensor([257, 513, 0, 300], dtype=torch.long)
+@@ -99,10 +117,10 @@ class BlockBucketizeTest(unittest.TestCase):
+         )
+         actual = torch.ops.fbgemm.block_bucketize_sparse_features(
+             *(
+-                tensor.cuda() if isinstance(tensor, torch.Tensor) else tensor
++                tensor.to(ACCELERATOR) if isinstance(tensor, torch.Tensor) else tensor
+                 for tensor in args
+             ),
+-            total_num_blocks=total_num_blocks.cuda(),
++            total_num_blocks=total_num_blocks.to(ACCELERATOR),
+         )
+         for expected_tensor, actual_tensor in zip(expected, actual):
+             if expected_tensor is None:
+@@ -115,7 +133,7 @@ class BlockBucketizeTest(unittest.TestCase):
  
      @given(
          long_indices=st.booleans(),
@@ -697,7 +723,7 @@ index e7c9837bf..80229c8d1 100644
          keep_orig_idx=st.booleans(),
          sequence=st.booleans(),
          bucketize_pos=st.booleans(),
-@@ -247,11 +265,11 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -283,11 +301,11 @@ class BlockBucketizeTest(unittest.TestCase):
                  new_pos_gpu,
                  unbucketize_permute_gpu,
              ) = torch.ops.fbgemm.block_bucketize_sparse_features(
@@ -712,7 +738,7 @@ index e7c9837bf..80229c8d1 100644
                  my_size,
                  None,
                  keep_orig_idx=keep_orig_idx,
-@@ -277,7 +295,7 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -313,7 +331,7 @@ class BlockBucketizeTest(unittest.TestCase):
  
      @given(
          long_indices=st.booleans(),
@@ -721,7 +747,7 @@ index e7c9837bf..80229c8d1 100644
          keep_orig_idx=st.booleans(),
          sequence=st.booleans(),
          bucketize_pos=st.booleans(),
-@@ -450,16 +468,16 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -486,16 +504,16 @@ class BlockBucketizeTest(unittest.TestCase):
              _,
              _,
          ) = torch.ops.fbgemm.block_bucketize_sparse_features(
@@ -742,7 +768,7 @@ index e7c9837bf..80229c8d1 100644
                  if not use_cpu
                  else keep_orig_idx_per_feature
              ),
-@@ -473,7 +491,7 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -509,7 +527,7 @@ class BlockBucketizeTest(unittest.TestCase):
  
      @given(
          long_indices=st.booleans(),
@@ -751,7 +777,7 @@ index e7c9837bf..80229c8d1 100644
          keep_orig_idx=st.booleans(),
          sequence=st.booleans(),
      )
-@@ -576,20 +594,20 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -612,20 +630,20 @@ class BlockBucketizeTest(unittest.TestCase):
              new_pos,
              unbucketize_permute,
          ) = torch.ops.fbgemm.block_bucketize_sparse_features(
@@ -777,7 +803,7 @@ index e7c9837bf..80229c8d1 100644
              ),
          )
  
-@@ -608,7 +626,7 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -644,7 +662,7 @@ class BlockBucketizeTest(unittest.TestCase):
  
      @given(
          long_indices=st.booleans(),
@@ -786,7 +812,7 @@ index e7c9837bf..80229c8d1 100644
          keep_orig_idx=st.booleans(),
          sequence=st.booleans(),
      )
-@@ -698,20 +716,20 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -734,20 +752,20 @@ class BlockBucketizeTest(unittest.TestCase):
              new_pos,
              unbucketize_permute,
          ) = torch.ops.fbgemm.block_bucketize_sparse_features(
@@ -812,7 +838,7 @@ index e7c9837bf..80229c8d1 100644
              ),
          )
  
-@@ -731,7 +749,7 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -767,7 +785,7 @@ class BlockBucketizeTest(unittest.TestCase):
  
      @given(
          long_indices=st.booleans(),
@@ -821,7 +847,7 @@ index e7c9837bf..80229c8d1 100644
          keep_orig_idx=st.booleans(),
          sequence=st.booleans(),
      )
-@@ -815,15 +833,15 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -851,15 +869,15 @@ class BlockBucketizeTest(unittest.TestCase):
              new_pos,
              unbucketize_permute,
          ) = torch.ops.fbgemm.block_bucketize_sparse_features(
@@ -841,7 +867,7 @@ index e7c9837bf..80229c8d1 100644
              ),
          )
  
-@@ -842,7 +860,7 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -878,7 +896,7 @@ class BlockBucketizeTest(unittest.TestCase):
  
      @given(
          long_indices=st.booleans(),
@@ -850,7 +876,7 @@ index e7c9837bf..80229c8d1 100644
          keep_orig_idx=st.booleans(),
          sequence=st.booleans(),
      )
-@@ -925,15 +943,15 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -961,15 +979,15 @@ class BlockBucketizeTest(unittest.TestCase):
              new_pos,
              unbucketize_permute,
          ) = torch.ops.fbgemm.block_bucketize_sparse_features(
@@ -870,7 +896,7 @@ index e7c9837bf..80229c8d1 100644
              ),
          )
  
-@@ -1059,7 +1077,7 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -1095,7 +1113,7 @@ class BlockBucketizeTest(unittest.TestCase):
              )
              torch.testing.assert_close(unbucketized_indices, indices, rtol=0, atol=0)
  
@@ -879,7 +905,7 @@ index e7c9837bf..80229c8d1 100644
              (
                  new_lengths_gpu,
                  new_indices_gpu,
-@@ -1067,14 +1085,14 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -1103,14 +1121,14 @@ class BlockBucketizeTest(unittest.TestCase):
                  new_pos_gpu,
                  unbucketize_permute_gpu,
              ) = torch.ops.fbgemm.block_bucketize_sparse_features(
@@ -898,7 +924,7 @@ index e7c9837bf..80229c8d1 100644
              )
              torch.testing.assert_close(
                  new_lengths_gpu.cpu(), new_lengths_ref, rtol=0, atol=0
-@@ -1167,7 +1185,7 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -1203,7 +1221,7 @@ class BlockBucketizeTest(unittest.TestCase):
          torch.testing.assert_close(new_lengths_cpu, new_lengths_ref, rtol=0, atol=0)
          torch.testing.assert_close(new_indices_cpu, new_indices_ref, rtol=0, atol=0)
  
@@ -907,7 +933,7 @@ index e7c9837bf..80229c8d1 100644
              (
                  new_lengths_gpu,
                  new_indices_gpu,
-@@ -1176,11 +1194,11 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -1212,11 +1230,11 @@ class BlockBucketizeTest(unittest.TestCase):
                  _,
                  bucket_mapping_gpu,
              ) = torch.ops.fbgemm.block_bucketize_sparse_features_inference(
@@ -922,7 +948,7 @@ index e7c9837bf..80229c8d1 100644
                  my_size,
                  None,
                  return_bucket_mapping=True,
-@@ -1258,7 +1276,7 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -1294,7 +1312,7 @@ class BlockBucketizeTest(unittest.TestCase):
          torch.testing.assert_close(new_lengths_cpu, new_lengths_ref, rtol=0, atol=0)
          torch.testing.assert_close(new_indices_cpu, new_indices_ref, rtol=0, atol=0)
  
@@ -931,7 +957,7 @@ index e7c9837bf..80229c8d1 100644
              (
                  new_lengths_gpu,
                  new_indices_gpu,
-@@ -1267,11 +1285,11 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -1303,11 +1321,11 @@ class BlockBucketizeTest(unittest.TestCase):
                  unbucketize_permute_gpu,
                  bucket_mapping_gpu,
              ) = torch.ops.fbgemm.block_bucketize_sparse_features_inference(
@@ -946,7 +972,7 @@ index e7c9837bf..80229c8d1 100644
                  my_size,
                  None,
                  return_bucket_mapping=True,
-@@ -1279,7 +1297,7 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -1315,7 +1333,7 @@ class BlockBucketizeTest(unittest.TestCase):
  
              unbucketize_permute_populated_gpu = (
                  torch.ops.fbgemm.populate_bucketized_permute(
@@ -955,7 +981,7 @@ index e7c9837bf..80229c8d1 100644
                      new_lengths_gpu,
                      bucket_mapping_gpu,
                  )
-@@ -1350,7 +1368,7 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -1386,7 +1404,7 @@ class BlockBucketizeTest(unittest.TestCase):
              atol=0,
          )
  
@@ -964,7 +990,7 @@ index e7c9837bf..80229c8d1 100644
              (
                  new_lengths_gpu,
                  _new_indices_gpu,
-@@ -1359,11 +1377,11 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -1395,11 +1413,11 @@ class BlockBucketizeTest(unittest.TestCase):
                  unbucketize_permute_gpu,
                  bucket_mapping_gpu,
              ) = torch.ops.fbgemm.block_bucketize_sparse_features_inference(
@@ -979,7 +1005,7 @@ index e7c9837bf..80229c8d1 100644
                  my_size,
                  None,
                  return_bucket_mapping=True,
-@@ -1371,7 +1389,7 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -1407,7 +1425,7 @@ class BlockBucketizeTest(unittest.TestCase):
  
              unbucketize_permute_populated_gpu = (
                  torch.ops.fbgemm.populate_bucketized_permute(
@@ -988,7 +1014,7 @@ index e7c9837bf..80229c8d1 100644
                      new_lengths_gpu,
                      bucket_mapping_gpu,
                  )
-@@ -1474,7 +1492,7 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -1510,7 +1528,7 @@ class BlockBucketizeTest(unittest.TestCase):
              lengths, indices, block_sizes, my_size, index_type
          )
  
@@ -997,7 +1023,7 @@ index e7c9837bf..80229c8d1 100644
      @given(
          index_type=st.sampled_from([torch.int, torch.long]),
      )
-@@ -1548,17 +1566,17 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -1584,17 +1602,17 @@ class BlockBucketizeTest(unittest.TestCase):
                  _,
                  bucket_mapping_gpu,
              ) = torch.ops.fbgemm.block_bucketize_sparse_features_inference(
@@ -1019,7 +1045,7 @@ index e7c9837bf..80229c8d1 100644
                  new_lengths_gpu,
                  bucket_mapping_gpu,
              )
-@@ -1644,7 +1662,7 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -1680,7 +1698,7 @@ class BlockBucketizeTest(unittest.TestCase):
          torch.testing.assert_close(new_lengths_cpu, new_lengths_ref, rtol=0, atol=0)
          torch.testing.assert_close(new_indices_cpu, new_indices_ref, rtol=0, atol=0)
  
@@ -1028,7 +1054,7 @@ index e7c9837bf..80229c8d1 100644
              (
                  new_lengths_gpu,
                  new_indices_gpu,
-@@ -1652,14 +1670,14 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -1688,14 +1706,14 @@ class BlockBucketizeTest(unittest.TestCase):
                  new_pos_gpu,
                  unbucketize_permute_gpu,
              ) = torch.ops.fbgemm.block_bucketize_sparse_features(
@@ -1048,7 +1074,7 @@ index e7c9837bf..80229c8d1 100644
                  max_B,
              )
  
-@@ -1785,7 +1803,7 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -1821,7 +1839,7 @@ class BlockBucketizeTest(unittest.TestCase):
          if has_weight:
              torch.testing.assert_close(new_weights_cpu, new_weights_ref)
  
@@ -1057,7 +1083,7 @@ index e7c9837bf..80229c8d1 100644
              block_bucketize_pos = [
                  torch.tensor(
                      [0, 2, 8],
-@@ -1810,14 +1828,14 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -1846,14 +1864,14 @@ class BlockBucketizeTest(unittest.TestCase):
                  new_pos_gpu,
                  unbucketize_permute,
              ) = torch.ops.fbgemm.block_bucketize_sparse_features(
@@ -1077,7 +1103,7 @@ index e7c9837bf..80229c8d1 100644
                  max_B,
                  block_bucketize_pos,
              )
-@@ -1842,7 +1860,7 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -1878,7 +1896,7 @@ class BlockBucketizeTest(unittest.TestCase):
                          is_int=False,
                      )
  
@@ -1086,7 +1112,7 @@ index e7c9837bf..80229c8d1 100644
      @given(
          index_type=st.sampled_from([torch.int, torch.long]),
          has_weight=st.booleans(),
-@@ -1916,14 +1934,14 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -1952,14 +1970,14 @@ class BlockBucketizeTest(unittest.TestCase):
              new_pos_gpu,
              unbucketize_permute_gpu,
          ) = torch.ops.fbgemm.block_bucketize_sparse_features(
@@ -1105,7 +1131,7 @@ index e7c9837bf..80229c8d1 100644
          )
  
          if sequence:
-@@ -2071,7 +2089,7 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -2107,7 +2125,7 @@ class BlockBucketizeTest(unittest.TestCase):
              torch.testing.assert_close(unbucketized_indices, indices, rtol=0, atol=0)
  
          # Test GPU implementation only if GPU is available
@@ -1114,7 +1140,7 @@ index e7c9837bf..80229c8d1 100644
              (
                  new_lengths_gpu,
                  new_indices_gpu,
-@@ -2079,13 +2097,13 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -2115,13 +2133,13 @@ class BlockBucketizeTest(unittest.TestCase):
                  new_pos_gpu,
                  unbucketize_permute_gpu,
              ) = torch.ops.fbgemm.block_bucketize_sparse_features(
@@ -1132,7 +1158,7 @@ index e7c9837bf..80229c8d1 100644
              )
  
              torch.testing.assert_close(
-@@ -2159,8 +2177,8 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -2195,8 +2213,8 @@ class BlockBucketizeTest(unittest.TestCase):
                  total_num_blocks=torch.tensor([7, 6, 6], dtype=torch.int),
              )
  
@@ -1143,7 +1169,7 @@ index e7c9837bf..80229c8d1 100644
      @optests.dontGenerateOpCheckTests(
          "large-grid GPU-memory-gated stress repro; opcheck variants only skip on "
          "CPU samples and add no op coverage (T191384137)"
-@@ -2229,8 +2247,21 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -2265,8 +2283,21 @@ class BlockBucketizeTest(unittest.TestCase):
          self.assertEqual(new_lengths.shape, (my_size * total_B,))
          self.assertEqual(new_indices.shape, (indices.numel(),))
          self.assertIsNone(new_weights)
@@ -1167,7 +1193,7 @@ index e7c9837bf..80229c8d1 100644
  
      @unittest.skipIf(*gpu_unavailable)
      # bucketized_lengths is int32[lengths_size * my_size] (~2.1 GiB at
-@@ -2298,5 +2329,26 @@ class BlockBucketizeTest(unittest.TestCase):
+@@ -2334,5 +2365,26 @@ class BlockBucketizeTest(unittest.TestCase):
  
  extend_test_class(BlockBucketizeTest)
  
@@ -1195,7 +1221,7 @@ index e7c9837bf..80229c8d1 100644
  if __name__ == "__main__":
      unittest.main()
 diff --git a/fbgemm_gpu/test/sparse/cumsum_test.py b/fbgemm_gpu/test/sparse/cumsum_test.py
-index ffacc8ce4..b2a25572d 100644
+index ffacc8ce..b2a25572 100644
 --- a/fbgemm_gpu/test/sparse/cumsum_test.py
 +++ b/fbgemm_gpu/test/sparse/cumsum_test.py
 @@ -29,6 +29,9 @@ else:
@@ -1217,7 +1243,7 @@ index ffacc8ce4..b2a25572d 100644
          batch_size=st.integers(10, 1000),
          max_len=st.integers(10, 1000),
 diff --git a/fbgemm_gpu/test/sparse/misc_ops_test.py b/fbgemm_gpu/test/sparse/misc_ops_test.py
-index d2c6acac9..6d30ebc74 100644
+index f2af5654..a636183b 100644
 --- a/fbgemm_gpu/test/sparse/misc_ops_test.py
 +++ b/fbgemm_gpu/test/sparse/misc_ops_test.py
 @@ -23,7 +23,7 @@ from .common import extend_test_class, open_source
@@ -1260,23 +1286,23 @@ index d2c6acac9..6d30ebc74 100644
      @given(
          N=st.integers(min_value=1, max_value=20),
          offsets_type=st.sampled_from([torch.int32, torch.int64]),
-@@ -89,6 +99,7 @@ class MiscOpsTest(unittest.TestCase):
-             range_ref = range_ref.to(range_gpu.dtype)
-             torch.testing.assert_close(range_gpu.cpu(), range_ref, rtol=0, atol=0)
+@@ -116,6 +126,7 @@ class MiscOpsTest(unittest.TestCase):
+         )
+         torch.testing.assert_close(range_gpu.cpu(), range_cpu, rtol=0, atol=0)
  
 +    @unittest.skip("Operator not implemented on XPU")
      @given(
          index_type=st.sampled_from([torch.int, torch.long]),
          has_weight=st.booleans(),
-@@ -159,6 +170,7 @@ class MiscOpsTest(unittest.TestCase):
-             if bucketize_pos:
-                 torch.testing.assert_close(new_pos_gpu.cpu(), new_pos_cpu)
+@@ -198,6 +209,7 @@ class MiscOpsTest(unittest.TestCase):
+         with self.assertRaisesRegex(RuntimeError, "lengths.numel"):
+             torch.ops.fbgemm.bucketize_sparse_features(lengths, indices, False, 1, None)
  
 +    @unittest.skip("Operator not implemented on XPU")
      def test_segment_sum_csr(self) -> None:
          segment_sum_cpu = torch.ops.fbgemm.segment_sum_csr(
              2,
-@@ -180,6 +192,7 @@ class MiscOpsTest(unittest.TestCase):
+@@ -219,6 +231,7 @@ class MiscOpsTest(unittest.TestCase):
                  segment_sum_cuda.cpu(), torch.Tensor([10.0, 11.0, 34.0]), rtol=0, atol=0
              )
  
@@ -1284,7 +1310,7 @@ index d2c6acac9..6d30ebc74 100644
      def test_segment_sum_csr_empty_input(self) -> None:
          segment_sum_cpu = torch.ops.fbgemm.segment_sum_csr(
              0,
-@@ -253,6 +266,7 @@ class MiscOpsTest(unittest.TestCase):
+@@ -292,6 +305,7 @@ class MiscOpsTest(unittest.TestCase):
  
          torch.testing.assert_close(output_gpu.cpu(), output_cpu)
  
@@ -1292,7 +1318,7 @@ index d2c6acac9..6d30ebc74 100644
      @given(
          batch_size=st.just(2),
          m=st.just(3),
-@@ -289,6 +303,7 @@ class MiscOpsTest(unittest.TestCase):
+@@ -328,6 +342,7 @@ class MiscOpsTest(unittest.TestCase):
          C = torch.ops.fbgemm.permute102_baddbmm_permute102(bias, A, B)
          torch.testing.assert_close(C.cpu(), C_ref.cpu())
  
@@ -1300,7 +1326,7 @@ index d2c6acac9..6d30ebc74 100644
      @given(
          T=st.integers(1, 5),
          B=st.integers(1, 5),
-@@ -320,6 +335,7 @@ class MiscOpsTest(unittest.TestCase):
+@@ -359,6 +374,7 @@ class MiscOpsTest(unittest.TestCase):
          all_indices_deduped_ref = torch.as_tensor(all_indices[:, :, :L])
          torch.testing.assert_close(all_indices_deduped, all_indices_deduped_ref)
  
@@ -1309,7 +1335,7 @@ index d2c6acac9..6d30ebc74 100644
          # When 'output_shape' is None, the function will return a tensor with dynamic shape.
          with self.assertRaisesRegex(
 diff --git a/fbgemm_gpu/test/sparse/permute_sparse_features_test.py b/fbgemm_gpu/test/sparse/permute_sparse_features_test.py
-index d358f4b8f..6d6495833 100644
+index 7696f166..6f4697c3 100644
 --- a/fbgemm_gpu/test/sparse/permute_sparse_features_test.py
 +++ b/fbgemm_gpu/test/sparse/permute_sparse_features_test.py
 @@ -19,16 +19,18 @@ from hypothesis import given, settings
@@ -1367,35 +1393,35 @@ index d358f4b8f..6d6495833 100644
 -    @unittest.skipIf(*gpu_unavailable)
 +    @unittest.skipIf(*accelerator_unavailable)
      def test_permute_2D_sparse_data(self) -> None:
-         lengths = torch.tensor(
-             [[0, 0, 1], [0, 1, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 1]],
+         for lengths_dtype in (torch.int32, torch.int64):
+             with self.subTest(lengths_dtype=lengths_dtype):
 diff --git a/fbgemm_gpu/test/sparse/reorder_batched_test.py b/fbgemm_gpu/test/sparse/reorder_batched_test.py
-index 44defe92c..5c2dded41 100644
+index 32f708f7..78708f45 100644
 --- a/fbgemm_gpu/test/sparse/reorder_batched_test.py
 +++ b/fbgemm_gpu/test/sparse/reorder_batched_test.py
-@@ -22,19 +22,27 @@ from .common import extend_test_class, open_source
+@@ -22,14 +22,26 @@ from .common import extend_test_class, open_source
  
  if open_source:
      # pyre-ignore[21]
--    from test_utils import gpu_memory_lt_gb, gpu_unavailable, optests, skipIfRocm
-+    from test_utils import accelerator_memory_lt_gb, accelerator_unavailable, current_accelerator, gpu_memory_lt_gb, gpu_unavailable, optests, skipIfRocm
+-    from test_utils import gpu_memory_lt_gb, gpu_unavailable, optests
++    from test_utils import accelerator_memory_lt_gb, accelerator_unavailable, current_accelerator, gpu_memory_lt_gb, gpu_unavailable, optests
  else:
      import fbgemm_gpu.sparse_ops  # noqa: F401, E402
-     from fbgemm_gpu.test.test_utils import (
+-    from fbgemm_gpu.test.test_utils import gpu_memory_lt_gb, gpu_unavailable, optests
++    from fbgemm_gpu.test.test_utils import (
 +        accelerator_memory_lt_gb,
 +        accelerator_unavailable,
 +        current_accelerator,
-         gpu_memory_lt_gb,
-         gpu_unavailable,
-         optests,
-         skipIfRocm,
-     )
- 
++        gpu_memory_lt_gb,
++        gpu_unavailable,
++        optests,
++    )
++
 +# Registers the XPU (Intel GPU) FBGEMM operator implementations.
 +import fbgemm_xpu  # noqa: F401, E402
 +
 +ACCELERATOR = current_accelerator()
-+
+ 
  
  class ReorderBatchedTest(unittest.TestCase):
 -    @unittest.skipIf(*gpu_unavailable)
@@ -1403,7 +1429,7 @@ index 44defe92c..5c2dded41 100644
      @given(
          B=st.integers(min_value=1, max_value=20),
          T=st.integers(min_value=1, max_value=20),
-@@ -59,7 +67,7 @@ class ReorderBatchedTest(unittest.TestCase):
+@@ -54,7 +66,7 @@ class ReorderBatchedTest(unittest.TestCase):
          if broadcast_lengths:
              cat_ad_lengths = (
                  torch.cat([torch.tensor([L for _ in range(T)]) for _ in range(B)], 0)
@@ -1412,7 +1438,7 @@ index 44defe92c..5c2dded41 100644
                  .to(Dtype)
              )
              cat_ad_lengths_broadcasted = cat_ad_lengths.tile([A])
-@@ -68,11 +76,11 @@ class ReorderBatchedTest(unittest.TestCase):
+@@ -63,11 +75,11 @@ class ReorderBatchedTest(unittest.TestCase):
                  torch.cat(
                      [torch.tensor([L for _ in range(T * A)]) for _ in range(B)], 0
                  )
@@ -1426,20 +1452,16 @@ index 44defe92c..5c2dded41 100644
          num_ads_in_batch = B * A
          reordered_batched_ad_lengths = torch.ops.fbgemm.reorder_batched_ad_lengths(
              cat_ad_lengths, batch_offsets, num_ads_in_batch, broadcast_lengths
-@@ -133,8 +141,10 @@ class ReorderBatchedTest(unittest.TestCase):
+@@ -128,7 +140,7 @@ class ReorderBatchedTest(unittest.TestCase):
              cat_ad_lengths_broadcasted, reordered_batched_ad_lengths
          )
  
--    @skipIfRocm
 -    @unittest.skipIf(*gpu_unavailable)
-+    # `skipIfRocm` is a decorator factory: applied bare it replaces the test with
-+    # its undecorated wrapper, silently discarding `@given` so the body never runs.
-+    @skipIfRocm()
 +    @unittest.skipIf(*accelerator_unavailable)
      @given(
          B=st.integers(min_value=1, max_value=20),
          T=st.integers(min_value=1, max_value=20),
-@@ -166,7 +176,7 @@ class ReorderBatchedTest(unittest.TestCase):
+@@ -160,7 +172,7 @@ class ReorderBatchedTest(unittest.TestCase):
                      size=(B * T * L,),
                  )
                  .int()
@@ -1448,7 +1470,7 @@ index 44defe92c..5c2dded41 100644
                  .to(Dtype)
              )
              cat_ad_lengths = (
-@@ -175,7 +185,7 @@ class ReorderBatchedTest(unittest.TestCase):
+@@ -169,7 +181,7 @@ class ReorderBatchedTest(unittest.TestCase):
                      0,
                  )
                  .int()
@@ -1457,7 +1479,7 @@ index 44defe92c..5c2dded41 100644
              )
              cat_ad_lengths_broadcasted = cat_ad_lengths.tile([A])
          else:
-@@ -186,7 +196,7 @@ class ReorderBatchedTest(unittest.TestCase):
+@@ -180,7 +192,7 @@ class ReorderBatchedTest(unittest.TestCase):
                      size=(B * T * A * L,),
                  )
                  .int()
@@ -1466,7 +1488,7 @@ index 44defe92c..5c2dded41 100644
                  .to(Dtype)
              )
              cat_ad_lengths = (
-@@ -195,10 +205,10 @@ class ReorderBatchedTest(unittest.TestCase):
+@@ -189,10 +201,10 @@ class ReorderBatchedTest(unittest.TestCase):
                      0,
                  )
                  .int()
@@ -1479,19 +1501,15 @@ index 44defe92c..5c2dded41 100644
          num_ads_in_batch = B * A
          reordered_cat_ad_lengths = torch.ops.fbgemm.reorder_batched_ad_lengths(
              cat_ad_lengths, batch_offsets, num_ads_in_batch, broadcast_indices
-@@ -511,7 +521,10 @@ class ReorderBatchedTest(unittest.TestCase):
+@@ -505,6 +517,7 @@ class ReorderBatchedTest(unittest.TestCase):
              reordered_sequence_embedding_from_indices, reordered_cat_sequence_embeddings
          )
  
--    @skipIfRocm
-+    # `skipIfRocm` is a decorator factory: applied bare it replaces the test with
-+    # its undecorated wrapper, silently discarding `@given` so the body never runs.
 +    # This op has no XPU kernel, so it stays gated on `gpu_unavailable`.
-+    @skipIfRocm()
      @unittest.skipIf(*gpu_unavailable)
      @given(
          B=st.integers(min_value=1, max_value=20),
-@@ -612,8 +625,8 @@ class ReorderBatchedTest(unittest.TestCase):
+@@ -610,8 +623,8 @@ class ReorderBatchedTest(unittest.TestCase):
              reordered_sequence_embedding_from_indices, reordered_cat_sequence_embeddings
          )
  
@@ -1502,7 +1520,7 @@ index 44defe92c..5c2dded41 100644
      @optests.dontGenerateOpCheckTests(
          "the 4-GiB grid-overflow regression is covered by the direct GPU test"
      )
-@@ -662,8 +675,8 @@ class ReorderBatchedTest(unittest.TestCase):
+@@ -660,8 +673,8 @@ class ReorderBatchedTest(unittest.TestCase):
  
          torch.testing.assert_close(reordered_gpu.cpu(), reordered_cpu)
  
@@ -1514,18 +1532,18 @@ index 44defe92c..5c2dded41 100644
          "the 4-GiB grid-overflow regression is covered by the direct GPU test"
      )
 diff --git a/fbgemm_gpu/test/tbe/utils/generate_vbe_metadata_test.py b/fbgemm_gpu/test/tbe/utils/generate_vbe_metadata_test.py
-index f78d25b3f..3f458e153 100755
+index 03826f5c..82eff7c1 100755
 --- a/fbgemm_gpu/test/tbe/utils/generate_vbe_metadata_test.py
 +++ b/fbgemm_gpu/test/tbe/utils/generate_vbe_metadata_test.py
-@@ -11,6 +11,7 @@ import unittest
- from itertools import accumulate
+@@ -12,6 +12,7 @@ from itertools import accumulate
  
+ import hypothesis.strategies as st
  import torch
 +import fbgemm_xpu  # noqa: F401  -- registers fbgemm XPU operator impls
  from fbgemm_gpu.split_table_batched_embeddings_ops_training_common import (
      generate_vbe_metadata,
  )
-@@ -20,9 +21,13 @@ from ..common import open_source
+@@ -22,9 +23,13 @@ from ..common import MAX_EXAMPLES, open_source
  
  if open_source:
      # pyre-ignore[21]
@@ -1541,9 +1559,9 @@ index f78d25b3f..3f458e153 100755
  
  
  class GenerateVBEMetadataTest(unittest.TestCase):
-@@ -152,6 +157,20 @@ class GenerateVBEMetadataTest(unittest.TestCase):
-         assert torch.equal(row_output_offsets.cpu(), row_output_offsets_cpu)
-         assert torch.equal(b_t_map.cpu(), b_t_map_cpu)
+@@ -179,6 +184,20 @@ class GenerateVBEMetadataTest(unittest.TestCase):
+             assert torch.equal(out_row_output_offsets.cpu(), row_output_offsets_ref)
+             assert torch.equal(out_b_t_map.cpu().view(torch.uint32), b_t_map_ref)
  
 +    @unittest.skipIf(*accelerator_unavailable)
 +    def test_get_infos_metadata(self) -> None:
@@ -1561,9 +1579,9 @@ index f78d25b3f..3f458e153 100755
 +
      # pyrefly: ignore [bad-argument-type]
      @unittest.skipIf(*gpu_unavailable)
-     def test_generate_vbe_metadata_kernel(self):
+     @given(
 diff --git a/fbgemm_gpu/test/tbe/utils/split_embeddings_utils_test.py b/fbgemm_gpu/test/tbe/utils/split_embeddings_utils_test.py
-index 0ec7ff32c..bbe95b20a 100644
+index b416f4a9..7df3891d 100644
 --- a/fbgemm_gpu/test/tbe/utils/split_embeddings_utils_test.py
 +++ b/fbgemm_gpu/test/tbe/utils/split_embeddings_utils_test.py
 @@ -16,6 +16,7 @@ import unittest
@@ -1574,7 +1592,7 @@ index 0ec7ff32c..bbe95b20a 100644
  import hypothesis.strategies as st
  import numpy as np
  import torch
-@@ -28,9 +29,19 @@ from ..common import MAX_EXAMPLES, open_source
+@@ -36,9 +37,19 @@ from ..common import MAX_EXAMPLES, open_source
  
  if open_source:
      # pyre-ignore[21]
@@ -1596,7 +1614,7 @@ index 0ec7ff32c..bbe95b20a 100644
  
  from fbgemm_gpu.split_table_batched_embeddings_ops_training_common import (
      generate_vbe_metadata,
-@@ -612,6 +623,24 @@ class SplitEmbeddingsUtilsTest(unittest.TestCase):
+@@ -770,6 +781,24 @@ class SplitEmbeddingsUtilsTest(unittest.TestCase):
                  )
              torch.testing.assert_close(dense_indices.clone().fill_(-1), dense_indices_)
  
@@ -1622,10 +1640,10 @@ index 0ec7ff32c..bbe95b20a 100644
          # pyre-ignore[16]
          tensor_queue = torch.classes.fbgemm.TensorQueue(torch.empty(0))
 diff --git a/fbgemm_gpu/test/test_utils.py b/fbgemm_gpu/test/test_utils.py
-index 63af8fe95..38c30409f 100644
+index 01eeaa34..84f87b6f 100644
 --- a/fbgemm_gpu/test/test_utils.py
 +++ b/fbgemm_gpu/test/test_utils.py
-@@ -66,6 +66,21 @@ gpu_unavailable: tuple[bool, str] = (
+@@ -67,6 +67,21 @@ gpu_unavailable: tuple[bool, str] = (
  # Used for `if` statements inside tests
  gpu_available: bool = not gpu_unavailable[0]
  
@@ -1646,8 +1664,8 @@ index 63af8fe95..38c30409f 100644
 +
  is_nvidia_device: bool = gpu_available and torch.version.cuda is not None
  
- # Used for `@unittest.skipIf` for tests that pass in internal CI, but fail on the GitHub runners
-@@ -138,17 +153,17 @@ def symint_vector_unsupported() -> tuple[bool, str]:
+ 
+@@ -150,17 +165,17 @@ def symint_vector_unsupported() -> tuple[bool, str]:
  
  
  def cpu_and_maybe_gpu() -> st.SearchStrategy[list[torch.device]]:
@@ -1670,7 +1688,7 @@ index 63af8fe95..38c30409f 100644
  
  
  class optests:
-@@ -287,6 +302,33 @@ def gpu_memory_lt_gb(x: int) -> tuple[bool, str]:
+@@ -299,6 +314,33 @@ def gpu_memory_lt_gb(x: int) -> tuple[bool, str]:
      )
  
  

@@ -45,7 +45,7 @@ cmake.version = ">=3.18"
 CMAKE_CXX_COMPILER = {env="CXX", default="icpx"}
 
 [[tool.scikit-build.generate]]
-path = "fbgemm_xpu/_version.py"
+path = "src/fbgemm_xpu/_version.py"
 template = '__version__ = "${version}"'
 
 [tool.scikit-build.metadata.version]

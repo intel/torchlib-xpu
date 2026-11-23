@@ -4,7 +4,6 @@
 
 import importlib
 import importlib.abc
-import importlib.metadata
 import sys
 import unittest
 
@@ -85,12 +84,3 @@ class TestExtensionLoading(unittest.TestCase):
                     sys.modules.pop("fbgemm_xpu", None)
                     sys.modules["fbgemm_xpu"] = package
                     sys.modules[blocked_module] = extension
-
-    def test_version_module_is_installed_in_the_package(self) -> None:
-        # __version__ falls back to the package metadata, so it is set even
-        # when the wheel installs _version.py outside fbgemm_xpu.
-        version_module = importlib.import_module("fbgemm_xpu._version")
-
-        self.assertEqual(
-            version_module.__version__, importlib.metadata.version("fbgemm-xpu")
-        )

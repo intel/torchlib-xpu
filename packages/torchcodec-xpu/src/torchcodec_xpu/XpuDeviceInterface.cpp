@@ -259,18 +259,17 @@ XpuDeviceInterface::XpuDeviceInterface(const StableDevice& device)
   torch::stable::Tensor dummyTensorForXpuInitialization = torch::stable::empty(
       {1}, kStableUInt8, std::nullopt, StableDevice(device));
 
-  sycl::queue queue = c10::xpu::getCurrentXPUStream(device_.index());
-  queue_ = queue;
+  queue_ = c10::xpu::getCurrentXPUStream(device_.index());
 
-  sycl_context_ = queue.get_context();
-  sycl_device_ = queue.get_device();
+  sycl_context_ = queue_->get_context();
+  sycl_device_ = queue_->get_device();
 
   l0_owns_fd_ = xpu::l0DriverOwnsImportedFd(*sycl_device_);
 
   ze_context_ = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(*sycl_context_);
   ze_device_ = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(*sycl_device_);
 
-  auto arch = xpu::getArchitecture(queue);
+  auto arch = xpu::getArchitecture(*queue_);
   if (!xpu::force_cpu_fallback()) {
     // Checking for devices which don't have HW media engines so we can skip
     // initialization of VAAPI context.
@@ -584,6 +583,7 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output_with_filter_graph(
 
   torch::stable::Tensor dst_rgb4 = AVFrameToTensor(filteredAVFrame);
   torch::stable::copy_(dst, torch::stable::narrow(dst_rgb4, 2, 0, 3));
+  c10::xpu::getCurrentXPUStream(device_.index()).queue().wait_and_throw();
 }
 
 bool XpuDeviceInterface::convert_av_frame_to_frame_output_with_sycl(

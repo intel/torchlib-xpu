@@ -53,7 +53,6 @@ class XpuDeviceInterface : public DeviceInterface {
       AVCodecContext* codec_context) override;
 
  private:
-  std::optional<sycl::queue> queue_;
   std::optional<sycl::context> sycl_context_;
   std::optional<sycl::device> sycl_device_;
   ze_context_handle_t ze_context_ = nullptr;

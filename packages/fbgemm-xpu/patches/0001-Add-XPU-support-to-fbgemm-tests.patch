@@ -1,4 +1,4 @@
-From 881bd696e41bdb8dabc1a88e5590f6b055dbf060 Mon Sep 17 00:00:00 2001
+From 431dfd5e2ca7824ed2d87e0eb8768af21fd6ab2c Mon Sep 17 00:00:00 2001
 From: Alberto Gallegos <alberto.gallegos.muro@intel.com>
 Date: Thu, 9 Jul 2026 18:28:28 +0000
 Subject: [PATCH] Add XPU support to FBGEMM sparse ops and jagged tensor tests
@@ -643,7 +643,7 @@ index c1e96324..c2d3a283 100644
          uncat_size = 2
          pooled_embeddings = [
 diff --git a/fbgemm_gpu/test/sparse/block_bucketize_test.py b/fbgemm_gpu/test/sparse/block_bucketize_test.py
-index 72c27e2c..1d4273e5 100644
+index 72c27e2c..e1a1b85f 100644
 --- a/fbgemm_gpu/test/sparse/block_bucketize_test.py
 +++ b/fbgemm_gpu/test/sparse/block_bucketize_test.py
 @@ -9,8 +9,10 @@
@@ -1205,8 +1205,8 @@ index 72c27e2c..1d4273e5 100644
 +class BlockBucketizeChunkedKernelTest(BlockBucketizeTest):
 +    """Every BlockBucketizeTest case with fbgemm_xpu's chunked kernel forced.
 +
-+    The automatic choice takes the chunked kernel only for a few long rows,
-+    which none of these tests builds.
++    The automatic choice takes the chunked kernel only for a few long rows;
++    only test_block_bucketize_long_sequence_warp_matches_cpu builds them.
 +    """
 +
 +    def setUp(self) -> None:

@@ -3,9 +3,7 @@
 
 #pragma once
 
-#include <optional>
 #include <level_zero/ze_api.h>
-#include <sycl/sycl.hpp>
 
 #include "DeviceInterface.h"
 #include "FilterGraph.h"
@@ -53,8 +51,6 @@ class XpuDeviceInterface : public DeviceInterface {
       AVCodecContext* codec_context) override;
 
  private:
-  std::optional<sycl::context> sycl_context_;
-  std::optional<sycl::device> sycl_device_;
   ze_context_handle_t ze_context_ = nullptr;
   ze_device_handle_t ze_device_ = nullptr;
 

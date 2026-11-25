@@ -215,7 +215,7 @@ jobs:
               - 'packages/fbgemm-xpu/**'
             dlrm-v3:
               - 'packages/fbgemm-xpu/**'
-              - '.github/workflows/ci.yml'
+              - '.github/scripts/dlrm-v3/**'
 
   test-torchcodec:
     needs: [ build, identify-changes ]

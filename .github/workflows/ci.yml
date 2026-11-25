@@ -721,7 +721,7 @@ jobs:
         if-no-files-found: ignore
 
   publish:
-    needs: [ compose, test-torchcodec, test-fbgemm, test-dlrm-v3 ]
+    needs: [ compose, test-torchcodec, test-fbgemm]
     if: ${{ !(failure() || cancelled()) }}
     runs-on: ubuntu-24.04
     permissions:

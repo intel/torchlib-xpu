@@ -4,7 +4,7 @@ requires = [
     "numpy~=2.0",
     "pybind11",
     "scikit-build-core>=0.10",
-    "torch~=2.14.0",
+    "torch~=2.15.0",
 ]
 build-backend = "scikit_build_core.build"
 
@@ -12,7 +12,7 @@ build-backend = "scikit_build_core.build"
 name = "fbgemm-xpu"
 description = "FBGEMM XPU operators for Intel GPUs"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [
     { name = "Alberto Gallegos Muro", email = "alberto.gallegos.muro@intel.com" },
@@ -21,9 +21,9 @@ authors = [
 ]
 dynamic = ["version"]
 dependencies = [
-    "fbgemm-gpu-cpu==1.9.0",
+    "fbgemm-gpu-cpu==1.10.0",
     "numpy~=2.0",
-    "torch~=2.14.0",
+    "torch~=2.15.0",
 ]
 
 [project.optional-dependencies]

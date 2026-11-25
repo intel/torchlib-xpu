@@ -2,7 +2,7 @@
 requires = [
     "pybind11",
     "scikit-build-core>=0.10",
-    "torch~=2.14.0",  # WA: must be specified in root project with build-constraint-dependencies
+    "torch~=2.15.0",  # WA: must be specified in root project with build-constraint-dependencies
     "torchcodec~=0.17.0"
 ]
 build-backend = "scikit_build_core.build"
@@ -11,14 +11,14 @@ build-backend = "scikit_build_core.build"
 name = "torchcodec-xpu"
 description = "Intel extension for torchcodec"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [
     { name = "Dmitry Rogozhkin", email = "dmitry.v.rogozhkin@intel.com" },
 ]
 dynamic = ["version"]
 dependencies = [
-    "torch~=2.14.0",
+    "torch~=2.15.0",
     "torchcodec~=0.17.0"
 ]
 

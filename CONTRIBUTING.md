@@ -116,7 +116,7 @@ The upstream FBGEMM tests cover shared operator behavior and parity with the CPU
 
 ```
 export FBGEMM_XPU_PATH=$TORCHLIB_XPU_PATH/packages/fbgemm-xpu/
-git clone --branch v1.9.0 https://github.com/pytorch/FBGEMM.git && cd FBGEMM
+git clone --branch v1.10.0 https://github.com/pytorch/FBGEMM.git && cd FBGEMM
 git am $FBGEMM_XPU_PATH/patches/0001-Add-XPU-support-to-fbgemm-tests.patch
 ```
 
@@ -162,7 +162,7 @@ The upstream FBGEMM jagged tensor benchmark script is also patched to time on XP
 
 ```
 export FBGEMM_XPU_PATH=$TORCHLIB_XPU_PATH/packages/fbgemm-xpu/
-git clone --branch v1.9.0 https://github.com/pytorch/FBGEMM.git && cd FBGEMM
+git clone --branch v1.10.0 https://github.com/pytorch/FBGEMM.git && cd FBGEMM
 git am $FBGEMM_XPU_PATH/patches/0001-Add-XPU-support-to-fbgemm-tests.patch
 git am $FBGEMM_XPU_PATH/patches/0002-Add-XPU-support-to-fbgemm-jagged-benchmark.patch
 ```
@@ -202,6 +202,7 @@ Use the following compatibility table when self-building the project and its dep
 
 | PyTorch | Torchvision | oneAPI         |
 | ------- | ----------- | -------------- |
+| 2.15    | 0.29        | [2026.1][2-15] |
 | 2.14    | 0.29        | [2026.1][2-14] |
 | 2.13    | 0.28        | [2026.0][2-13] |
 | 2.12    | 0.27        | [2025.3][2-12] |
@@ -213,6 +214,7 @@ Use the following compatibility table when self-building the project and its dep
 [TorchCodec]: https://github.com/meta-pytorch/torchcodec
 [FBGEMM]: https://github.com/pytorch/FBGEMM
 
+[2-15]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-15.html
 [2-14]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-14.html
 [2-13]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-13.html
 [2-12]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-12.html

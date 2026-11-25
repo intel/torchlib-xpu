@@ -479,7 +479,11 @@ Tensor split_embedding_codegen_lookup_rowwise_adagrad_function_pt2_xpu(
     std::vector<double> optim_float, const c10::SymInt max_B = -1,
     const c10::SymInt max_B_feature_rank = -1,
     const c10::SymInt vbe_output_size = -1,
-    std::optional<Tensor> vbe_output = std::nullopt) {
+    std::optional<Tensor> vbe_output = std::nullopt,
+    [[maybe_unused]] std::optional<std::vector<std::optional<at::Tensor>>>
+        optim_tensor_optional = std::nullopt,
+    [[maybe_unused]] std::optional<c10::List<bool>> optim_bool_optional =
+        std::nullopt) {
     // has vbe support and on xpu
     if (aux_tensor[IDX_B_OFFSETS].has_value()) {
         if (aux_bool[IDX_APPLY_GLOBAL_WEIGHT_DECAY] && optim_float[1] > 0) {

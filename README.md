@@ -88,4 +88,4 @@ uv venv && uv pip install -e . \
 [TorchCodec]: https://github.com/meta-pytorch/torchcodec
 [uv]: https://github.com/astral-sh/uv
 
-[2026.1]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-14.html
+[2026.1]: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-15.html

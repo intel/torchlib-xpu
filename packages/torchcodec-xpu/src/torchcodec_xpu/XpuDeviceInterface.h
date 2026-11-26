@@ -71,6 +71,7 @@ class XpuDeviceInterface : public DeviceInterface {
   // Used to know whether a new FilterGraphContext should
   // be created before decoding a new frame.
   FiltersConfig prev_filters_config_;
+  UniqueAVBufferRef filter_hw_frames_ctx_;
 
   void ensure_cpu_interface();
 

@@ -7,6 +7,7 @@
 #include <string>
 #include <unordered_map>
 #include <filesystem>
+#include <mutex>
 
 #include <level_zero/ze_api.h>
 #include <va/va_drmcommon.h>
@@ -384,11 +385,21 @@ torch::stable::Tensor XpuDeviceInterface::AVFrameToTensor(
     const UniqueAVFrame& frame) {
   TORCH_CHECK_EQ(frame->format, AV_PIX_FMT_VAAPI);
 
+  VADisplay va_display = getVaDisplayFromAV(frame.get());
+  VASurfaceID surface_id = (VASurfaceID)(uintptr_t)frame->data[3];
+
+  // The VAAPI filter (scale_vaapi) only submits the work: the surface may still
+  // be written by the media engine. Wait for it before the GPU reads the
+  // exported memory (same as FFmpeg does in vaapi_map_to_drm_esh).
+  VAStatus sts = vaSyncSurface(va_display, surface_id);
+  TORCH_CHECK(
+      sts == VA_STATUS_SUCCESS, "vaSyncSurface failed: ", vaErrorStr(sts));
+
   VADRMPRIMESurfaceDescriptor desc{};
 
-  VAStatus sts = vaExportSurfaceHandle(
-      getVaDisplayFromAV(frame.get()),
-      (VASurfaceID)(uintptr_t)frame->data[3],
+  sts = vaExportSurfaceHandle(
+      va_display,
+      surface_id,
       VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
       VA_EXPORT_SURFACE_READ_ONLY,
       &desc);
@@ -569,7 +580,6 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output_with_filter_graph(
   // Actual output color format will be set via filter options
   filtersConfig.output_format = AV_PIX_FMT_VAAPI;
   filtersConfig.time_base = time_base_;
-  filtersConfig.hw_frames_ctx.reset(av_buffer_ref(av_frame.hw_frames_ctx));
 
   std::stringstream filters;
   filters << "scale_vaapi=" << frameDims.width << ":" << frameDims.height;
@@ -579,9 +589,19 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output_with_filter_graph(
 
   filtersConfig.filtergraph_str = filters.str();
 
-  if (!filter_graph_ || prev_filters_config_ != filtersConfig) {
+  TORCH_CHECK(av_frame.hw_frames_ctx, "Filter hardware frames context is not initialized");
+
+  const bool same_context =
+      filter_hw_frames_ctx_ && filter_hw_frames_ctx_->buffer == av_frame.hw_frames_ctx->buffer;
+
+  if (!filter_graph_ || !same_context || prev_filters_config_ != filtersConfig ||
+      (prev_filters_config_.input_aspect_ratio.num != filtersConfig.input_aspect_ratio.num ||
+       prev_filters_config_.input_aspect_ratio.den != filtersConfig.input_aspect_ratio.den)) {
+    filtersConfig.hw_frames_ctx.reset(av_buffer_ref(av_frame.hw_frames_ctx));
+    TORCH_CHECK(filtersConfig.hw_frames_ctx, "Failed to set hardware frames context");
     filter_graph_ =
         std::make_unique<FilterGraph>(filtersConfig, video_stream_options_);
+    filter_hw_frames_ctx_ = std::move(filtersConfig.hw_frames_ctx);
     prev_filters_config_ = std::move(filtersConfig);
   }
 
@@ -590,6 +610,14 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output_with_filter_graph(
   UniqueAVFrame filteredAVFrame = filter_graph_->convert(av_frame);
 
   TORCH_CHECK_EQ(filteredAVFrame->format, AV_PIX_FMT_VAAPI);
+
+  // Importing/freeing the VAAPI surface in Level Zero while another thread's
+  // copy kernel is running on the same context leads to
+  // UR_RESULT_ERROR_DEVICE_LOST / OUT_OF_RESOURCES with concurrent decoders.
+  // Serialize import -> copy -> free across all decoders in the process. The
+  // lock is declared before dst_rgb4 so it is released after the deleter runs.
+  static std::mutex import_mutex;
+  std::lock_guard<std::mutex> import_lock(import_mutex);
 
   torch::stable::Tensor dst_rgb4 = AVFrameToTensor(filteredAVFrame);
   torch::stable::copy_(dst, torch::stable::narrow(dst_rgb4, 2, 0, 3));

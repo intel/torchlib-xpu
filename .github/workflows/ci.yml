@@ -580,11 +580,6 @@ jobs:
     env:
       PYTHON_VERSION: ${{ matrix.python-version }}
       WHEELS: torchlib-${{ matrix.python-version }}-wheels
-      # aagalleg/FBGEMM#1 (ComputeDevice.XPU): its Python changes are applied
-      # over the fbgemm-gpu-cpu 1.9.0 wheel. BASE is the PR's base commit.
-      FBGEMM_PR_REPO: aagalleg/FBGEMM
-      FBGEMM_PR_BASE: c0c345570fed8ae3c8850dcf3bd1b37961aafbb8
-      FBGEMM_PR_HEAD: f2e945395a299b3738fbe66c664c7ed1ecd09666
       # manuelhsantana/torchrec#3 (XPU in planner, sharding, training) with
       # manuelhsantana/torchrec#4 (quantized inference) merged into it.
       TORCHREC_REPO: manuelhsantana/torchrec
@@ -666,7 +661,7 @@ jobs:
         echo "$VENV/bin" >> $GITHUB_PATH
     - name: 'Install fbgemm-xpu'
       run: |
-        # Pulls torch (XPU) and fbgemm-gpu-cpu==1.9.0.
+        # Pulls torch (XPU) and fbgemm-gpu-cpu.
         pip install --no-cache-dir \
           "$(ls ./_wheels/${{ env.WHEELS }}-${{ env.PR_OR_SHA }}-${{ env.UNIQUE_ID }}/fbgemm_xpu*.whl)" \
           --extra-index-url https://download.pytorch.org/whl/xpu
@@ -676,9 +671,6 @@ jobs:
         PANDAS_VERSION: ${{ matrix.pandas }}
       run: |
         "$SCRIPTS/install-dependencies.sh" torchrec
-    - name: 'Apply aagalleg/FBGEMM#1 over fbgemm-gpu-cpu 1.9.0'
-      run: |
-        "$SCRIPTS/apply-fbgemm-pr.sh"
     - name: 'Test stack on XPU (FBGEMM, TorchRec, fbgemm-xpu)'
       env:
         # XCCL loads oneCCL from the virtual environment.

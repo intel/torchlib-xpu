@@ -583,10 +583,10 @@ jobs:
       # manuelhsantana/torchrec#3 (XPU in planner, sharding, training) with
       # manuelhsantana/torchrec#4 (quantized inference) merged into it.
       TORCHREC_REPO: manuelhsantana/torchrec
-      TORCHREC_SHA: 072b992e6b5cee372548fb62fbecf12c9e553dc2
+      TORCHREC_TAG: ci-pin-fbgemm-1.10.0_1
       # aagalleg/generative-recommenders#3: DLRM-v3 training on XPU.
       GR_TRAIN_REPO: aagalleg/generative-recommenders
-      GR_TRAIN_SHA: 6ecb92103da2c0d251759d84b65c53664c4bb29a
+      GR_TRAIN_TAG: ci-pin-fbgemm-1.10.0_1
       ML1M_URL: https://files.grouplens.org/datasets/movielens/ml-1m.zip
       ML1M_SHA256: a6898adb50b9ca05aa231689da44c217cb524e7ebd39d264c56e2832f2c54e20
       # sasrec_format.csv written by GR's preprocessor from that archive, seeded
@@ -643,13 +643,13 @@ jobs:
       uses: actions/checkout@v7
       with:
         repository: ${{ env.TORCHREC_REPO }}
-        ref: ${{ env.TORCHREC_SHA }}
+        ref: ${{ env.TORCHREC_TAG }}
         path: torchrec
     - name: 'Checkout generative-recommenders (training)'
       uses: actions/checkout@v7
       with:
         repository: ${{ env.GR_TRAIN_REPO }}
-        ref: ${{ env.GR_TRAIN_SHA }}
+        ref: ${{ env.GR_TRAIN_TAG }}
         path: gr-train
     - name: 'Set up Python ${{ env.PYTHON_VERSION }}'
       uses: actions/setup-python@v7

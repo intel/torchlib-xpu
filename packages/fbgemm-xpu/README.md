@@ -179,17 +179,18 @@ The lookup operators do not currently support:
 - global weight decay (GWD);
 - cache-backed lookup.
 
-The pristine FBGEMM 1.9.0 high-level training frontend does not expose
-`ComputeDevice.XPU`. Constructing
-`SplitTableBatchedEmbeddingBagsCodegen` for XPU is therefore unavailable in
-this release. The upstream high-level TBE tests therefore do not exercise these
-lookup operators on XPU. Instead, CI runs
-[`test_lookup_ops.py`](tests/test_lookup_ops.py), which calls the supported
-`torch.ops.fbgemm` methods directly on XPU. The separately patched upstream
-FBGEMM tests cover the existing non-lookup operators.
+FBGEMM 1.10 adds `ComputeDevice.XPU` to the high-level training frontend, but
+`SplitTableBatchedEmbeddingBagsCodegen` still takes its device from
+`torch.cuda.current_device()` unless `device=` is given, and the upstream
+high-level TBE tests do not exercise these lookup operators on XPU. Instead, CI
+runs [`test_lookup_ops.py`](tests/test_lookup_ops.py), which calls the
+supported `torch.ops.fbgemm` methods directly on XPU. The separately patched
+upstream FBGEMM tests cover the existing non-lookup operators.
 
-`bounds_check_indices` implements version 1 only. Version 2 and
-`prefetch_pipeline=True` are not implemented on XPU.
+`bounds_check_indices` implements version 1 only, with the `FATAL`, `WARNING`
+and `IGNORE` modes. Version 2, `prefetch_pipeline=True` and the
+`WARNING_ALLOW_TRAILING_INDICES` mode of FBGEMM 1.10 are not implemented on
+XPU.
 
 `all_to_one_device` copies between XPU devices of one process. The pooled
 merge operators (`merge_pooled_embeddings`, `sum_reduce_to_one`) are not

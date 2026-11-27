@@ -164,7 +164,9 @@ TORCH_LIBRARY_FRAGMENT(fbgemm, m) {
             "    SymInt max_B=-1, "
             "    SymInt max_B_feature_rank=-1, "
             "    SymInt vbe_output_size=-1, "
-            "    Tensor? vbe_output=None "
+            "    Tensor? vbe_output=None, "
+            "    Tensor?[]? optim_tensor=None, "
+            "    bool[]? optim_bool=None "
             ") -> Tensor");
     }
 

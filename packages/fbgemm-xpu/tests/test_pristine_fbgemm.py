@@ -95,9 +95,11 @@ class TestPristineFbgemm(unittest.TestCase):
             f"Frontend process terminated abnormally: {result.stderr}",
         )
         self.assertIn("FRONTEND_IMPORTS_OK", result.stdout)
+        # FBGEMM 1.10 has ComputeDevice.XPU, but without device= the TBE
+        # constructor takes its device from torch.cuda.current_device().
         self.assertRegex(
             result.stderr,
-            r"AttributeError: (type object 'ComputeDevice' has no attribute 'XPU'|XPU)",
+            r"AssertionError: Torch not compiled with CUDA enabled",
         )
 
         self.assert_existing_xpu_operator_works()

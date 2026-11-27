@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <level_zero/ze_api.h>
+
 #include "DeviceInterface.h"
 #include "FilterGraph.h"
 
@@ -49,6 +51,9 @@ class XpuDeviceInterface : public DeviceInterface {
       AVCodecContext* codec_context) override;
 
  private:
+  ze_context_handle_t ze_context_ = nullptr;
+  ze_device_handle_t ze_device_ = nullptr;
+
   // CPU fallback interface. Used when frames cannot be handled on XPU
   std::unique_ptr<DeviceInterface> cpu_interface_;
 
@@ -57,6 +62,7 @@ class XpuDeviceInterface : public DeviceInterface {
   bool has_fp64_;
   bool has_decoded_frame_ = false;
   bool using_cpu_fallback_ = false;
+  bool l0_owns_fd_ = false;
 
   UniqueAVBufferRef ctx_;
 
@@ -67,6 +73,8 @@ class XpuDeviceInterface : public DeviceInterface {
   FiltersConfig prev_filters_config_;
 
   void ensure_cpu_interface();
+
+  torch::stable::Tensor AVFrameToTensor(const UniqueAVFrame& frame);
 
   // Optimized conversion. Return value indicates if conversion was
   // successfull.

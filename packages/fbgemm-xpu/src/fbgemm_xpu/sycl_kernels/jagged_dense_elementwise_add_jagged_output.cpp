@@ -111,7 +111,7 @@ jagged_dense_elementwise_add_jagged_output_xpu(
  * The schema is already declared by the upstream fbgemm-gpu-cpu package
  * (jagged_tensor_ops_cpu.cpp), which fbgemm_xpu/__init__.py imports before _C
  * loads, so only the XPU dispatch key is registered here. Autograd is owned by
- * the upstream Autograd-key wrapper; see the header for details.
+ * the upstream Autograd-key wrapper (jagged_tensor_ops_autograd.cpp).
  */
 TORCH_LIBRARY_IMPL(fbgemm, XPU, m) {
     m.impl(

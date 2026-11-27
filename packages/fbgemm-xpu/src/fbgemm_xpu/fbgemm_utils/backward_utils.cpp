@@ -10,12 +10,6 @@
 
 namespace fbgemm_xpu {
 
-// oneDPL's default kernel naming can collide when this sort callsite is
-// instantiated multiple times via dispatch templates. Give it an explicit,
-// type-dependent kernel name to keep device symbols unique.
-template <typename key_t, typename value_t>
-class TransposeEmbeddingInputSortKernel;
-
 void SplitEmbeddingBackwardFindLongSegments::operator()(
     const sycl::nd_item<1>& item) const {
     const auto threadIdx_x = item.get_local_id(0);
@@ -122,7 +116,6 @@ void LinearizeIndexKernel<index_t, info_acc_t, nobag, vbe>::operator()(
     const auto blockDim_x = item.get_local_range(0);
     const auto sg = item.get_sub_group();
 
-    // Print from first work-item only to avoid spam
     const auto T = hash_size_cumsum_.size(0) - 1;
 
     auto b_t = blockIdx_x * blockDim_x + threadIdx_x;

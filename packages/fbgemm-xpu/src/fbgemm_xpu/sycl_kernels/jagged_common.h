@@ -111,7 +111,7 @@ struct StackArray {
 //   jagged-output launch sites. SYCL kernels must be functors, so each CUDA
 //   lambda becomes a named struct here providing both arities directly.
 //
-// Arithmetic is performed in float and rounded once on store - deviation (1).
+// Arithmetic is performed in float and rounded once on store.
 //
 // f = x  (jagged_to_padded_dense_forward)
 struct JaggedOpCopyX {

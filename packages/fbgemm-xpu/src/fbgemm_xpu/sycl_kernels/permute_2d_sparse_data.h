@@ -127,8 +127,10 @@ private:
  * @brief SYCL kernel functor for permuting 2D data (with or without weights).
  *
  * 2D parallel decomposition:
- *   - Dimension 0 (rows): threads cooperating on one segment.
- *   - Dimension 1 (cols): segments (one row of work-items per segment).
+ *   - Dimension 0: threads cooperating on one segment (the role of CUDA's
+ *     threadIdx.x).
+ *   - Dimension 1: segments within a work-group (the role of CUDA's
+ *     threadIdx.y).
  *
  * When `has_weight` is false, `weights` and `permuted_weights` may be nullptr
  * and `weights_columns` is ignored.

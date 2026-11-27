@@ -373,7 +373,7 @@ def make_pta_acc_format(pta_str_list: list[str], func_name: str) -> list[str]:
     for pta_str in pta_str_list:
         if "packed_accessor" in pta_str:
             match = re.search(
-                r"([a-zA-Z0-9_]*)[.]packed_accessor([3|6][2|4])<(.*)>\(\)", pta_str
+                r"([a-zA-Z0-9_]*)[.]packed_accessor(32|64)<(.*)>\(\)", pta_str
             )
             if match is None or len(match.groups()) != 3:
                 raise ValueError(
@@ -387,7 +387,7 @@ def make_pta_acc_format(pta_str_list: list[str], func_name: str) -> list[str]:
                         f"Failed to parse acc_type expression: {args}"
                     )
                 new_type = match.group(1)
-                args = re.sub("at::acc_type<[a-zA-Z_]*, true>", new_type, args)
+                args = re.sub("at::acc_type<[a-zA-Z_0-9]*, true>", new_type, args)
                 macro_name = "MAKE_PTA_ACC_WITH_NAME"
             else:
                 macro_name = "MAKE_PTA_WITH_NAME"
@@ -405,7 +405,7 @@ def make_pta_acc_builder_format(pta_str_list: list[str]) -> list[str]:
     for pta_str in pta_str_list:
         if "packed_accessor" in pta_str:
             match = re.search(
-                r"([a-zA-Z0-9_]*)[.]packed_accessor([3|6][2|4])<(.*)>\(\)", pta_str
+                r"([a-zA-Z0-9_]*)[.]packed_accessor(32|64)<(.*)>\(\)", pta_str
             )
             if match is None or len(match.groups()) != 3:
                 raise ValueError(
@@ -419,7 +419,7 @@ def make_pta_acc_builder_format(pta_str_list: list[str]) -> list[str]:
                         f"Failed to parse acc_type expression: {args}"
                     )
                 new_type = match.group(1)
-                args = re.sub("at::acc_type<[a-zA-Z_]*, true>", new_type, args)
+                args = re.sub("at::acc_type<[a-zA-Z_0-9]*, true>", new_type, args)
                 macro_name = "PTA_ACC_B"
             else:
                 macro_name = "PTA_B"

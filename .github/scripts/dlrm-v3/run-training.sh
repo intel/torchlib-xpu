@@ -17,6 +17,11 @@ cd "${1:?usage: run-training.sh <generative-recommenders checkout>}"
 # Shortened copy of movielens_1m_xpu.gin: the overrides come last, and gin
 # keeps the last binding of a parameter.
 gin=generative_recommenders/dlrm_v3/train/gin/movielens_1m_xpu.gin
+# train_ranker reads the gin file from the checkout, so the overrides are
+# appended in place; restore the file on exit so reruns don't stack them.
+orig=$(mktemp)
+cp "$gin" "$orig"
+trap 'cp "$orig" "$gin"; rm -f "$orig"' EXIT
 cat >> "$gin" <<EOF
 
 # torchlib-xpu CI (test-dlrm-v3): bounded train-eval smoke.

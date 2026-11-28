@@ -7,7 +7,6 @@
 #include <string>
 #include <unordered_map>
 #include <filesystem>
-#include <mutex>
 
 #include <level_zero/ze_api.h>
 #include <va/va_drmcommon.h>
@@ -611,22 +610,31 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output_with_filter_graph(
 
   TORCH_CHECK_EQ(filteredAVFrame->format, AV_PIX_FMT_VAAPI);
 
-  // Importing/freeing the VAAPI surface in Level Zero while another thread's
-  // copy kernel is running on the same context leads to
-  // UR_RESULT_ERROR_DEVICE_LOST / OUT_OF_RESOURCES with concurrent decoders.
-  // Serialize import -> copy -> free across all decoders in the process. The
-  // lock is declared before dst_rgb4 so it is released after the deleter runs.
-  static std::mutex import_mutex;
-  std::lock_guard<std::mutex> import_lock(import_mutex);
-
-  torch::stable::Tensor dst_rgb4 = AVFrameToTensor(filteredAVFrame);
-  torch::stable::copy_(dst, torch::stable::narrow(dst_rgb4, 2, 0, 3));
-  // The copy above is enqueued asynchronously and reads from dst_rgb4, which
-  // wraps the imported VAAPI surface of filteredAVFrame. When dst_rgb4 goes out
-  // of scope its deleter frees the imported memory (zeMemFree) and releases
-  // the frame back to the filter graph pool, where it can be reused. Wait for
-  // the copy to complete before that happens.
-  c10::xpu::getCurrentXPUStream(device_.index()).synchronize();
+  // Running a PyTorch kernel directly on the imported dma-buf memory while
+  // other decoder threads import/free surfaces on the same Level Zero context
+  // leads to UR_RESULT_ERROR_DEVICE_LOST, then OUT_OF_RESOURCES (observed with
+  // concurrent decoders; a plain SYCL memcpy of the same memory, or the SYCL
+  // color conversion path, is not affected). So stage the surface into a
+  // PyTorch-owned buffer, release the import, then drop the alpha channel
+  // from the staged copy.
+  torch::stable::Tensor rgbx = torch::stable::empty(
+      {filteredAVFrame->height, filteredAVFrame->width, 4},
+      kStableUInt8,
+      std::nullopt,
+      device_);
+  {
+    torch::stable::Tensor imported = AVFrameToTensor(filteredAVFrame);
+    // Wait for this copy only: the deleter of imported frees the Level Zero
+    // import and releases the frame back to the filter graph pool.
+    c10::xpu::getCurrentXPUStream(device_.index())
+        .queue()
+        .memcpy(
+            rgbx.data_ptr(),
+            imported.data_ptr(),
+            static_cast<size_t>(rgbx.numel()))
+        .wait();
+  }
+  torch::stable::copy_(dst, torch::stable::narrow(rgbx, 2, 0, 3));
 }
 
 bool XpuDeviceInterface::convert_av_frame_to_frame_output_with_sycl(

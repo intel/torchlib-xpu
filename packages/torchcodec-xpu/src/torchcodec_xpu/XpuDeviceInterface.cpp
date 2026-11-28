@@ -384,11 +384,21 @@ torch::stable::Tensor XpuDeviceInterface::AVFrameToTensor(
     const UniqueAVFrame& frame) {
   TORCH_CHECK_EQ(frame->format, AV_PIX_FMT_VAAPI);
 
+  VADisplay va_display = getVaDisplayFromAV(frame.get());
+  VASurfaceID surface_id = (VASurfaceID)(uintptr_t)frame->data[3];
+
+  // The VAAPI filter (scale_vaapi) only submits the work: the surface may still
+  // be written by the media engine. Wait for it before the GPU reads the
+  // exported memory (same as FFmpeg does in vaapi_map_to_drm_esh).
+  VAStatus sts = vaSyncSurface(va_display, surface_id);
+  TORCH_CHECK(
+      sts == VA_STATUS_SUCCESS, "vaSyncSurface failed: ", vaErrorStr(sts));
+
   VADRMPRIMESurfaceDescriptor desc{};
 
-  VAStatus sts = vaExportSurfaceHandle(
-      getVaDisplayFromAV(frame.get()),
-      (VASurfaceID)(uintptr_t)frame->data[3],
+  sts = vaExportSurfaceHandle(
+      va_display,
+      surface_id,
       VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
       VA_EXPORT_SURFACE_READ_ONLY,
       &desc);
@@ -569,7 +579,6 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output_with_filter_graph(
   // Actual output color format will be set via filter options
   filtersConfig.output_format = AV_PIX_FMT_VAAPI;
   filtersConfig.time_base = time_base_;
-  filtersConfig.hw_frames_ctx.reset(av_buffer_ref(av_frame.hw_frames_ctx));
 
   std::stringstream filters;
   filters << "scale_vaapi=" << frameDims.width << ":" << frameDims.height;
@@ -579,9 +588,19 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output_with_filter_graph(
 
   filtersConfig.filtergraph_str = filters.str();
 
-  if (!filter_graph_ || prev_filters_config_ != filtersConfig) {
+  TORCH_CHECK(av_frame.hw_frames_ctx, "Filter hardware frames context is not initialized");
+
+  const bool same_context =
+      filter_hw_frames_ctx_ && filter_hw_frames_ctx_->buffer == av_frame.hw_frames_ctx->buffer;
+
+  if (!filter_graph_ || !same_context || prev_filters_config_ != filtersConfig ||
+      (prev_filters_config_.input_aspect_ratio.num != filtersConfig.input_aspect_ratio.num ||
+       prev_filters_config_.input_aspect_ratio.den != filtersConfig.input_aspect_ratio.den)) {
+    filtersConfig.hw_frames_ctx.reset(av_buffer_ref(av_frame.hw_frames_ctx));
+    TORCH_CHECK(filtersConfig.hw_frames_ctx, "Failed to set hardware frames context");
     filter_graph_ =
         std::make_unique<FilterGraph>(filtersConfig, video_stream_options_);
+    filter_hw_frames_ctx_ = std::move(filtersConfig.hw_frames_ctx);
     prev_filters_config_ = std::move(filtersConfig);
   }
 
@@ -591,14 +610,31 @@ void XpuDeviceInterface::convert_av_frame_to_frame_output_with_filter_graph(
 
   TORCH_CHECK_EQ(filteredAVFrame->format, AV_PIX_FMT_VAAPI);
 
-  torch::stable::Tensor dst_rgb4 = AVFrameToTensor(filteredAVFrame);
-  torch::stable::copy_(dst, torch::stable::narrow(dst_rgb4, 2, 0, 3));
-  // The copy above is enqueued asynchronously and reads from dst_rgb4, which
-  // wraps the imported VAAPI surface of filteredAVFrame. When dst_rgb4 goes out
-  // of scope its deleter frees the imported memory (zeMemFree) and releases
-  // the frame back to the filter graph pool, where it can be reused. Wait for
-  // the copy to complete before that happens.
-  c10::xpu::getCurrentXPUStream(device_.index()).synchronize();
+  // Running a PyTorch kernel directly on the imported dma-buf memory while
+  // other decoder threads import/free surfaces on the same Level Zero context
+  // leads to UR_RESULT_ERROR_DEVICE_LOST, then OUT_OF_RESOURCES (observed with
+  // concurrent decoders; a plain SYCL memcpy of the same memory, or the SYCL
+  // color conversion path, is not affected). So stage the surface into a
+  // PyTorch-owned buffer, release the import, then drop the alpha channel
+  // from the staged copy.
+  torch::stable::Tensor rgbx = torch::stable::empty(
+      {filteredAVFrame->height, filteredAVFrame->width, 4},
+      kStableUInt8,
+      std::nullopt,
+      device_);
+  {
+    torch::stable::Tensor imported = AVFrameToTensor(filteredAVFrame);
+    // Wait for this copy only: the deleter of imported frees the Level Zero
+    // import and releases the frame back to the filter graph pool.
+    c10::xpu::getCurrentXPUStream(device_.index())
+        .queue()
+        .memcpy(
+            rgbx.data_ptr(),
+            imported.data_ptr(),
+            static_cast<size_t>(rgbx.numel()))
+        .wait();
+  }
+  torch::stable::copy_(dst, torch::stable::narrow(rgbx, 2, 0, 3));
 }
 
 bool XpuDeviceInterface::convert_av_frame_to_frame_output_with_sycl(
